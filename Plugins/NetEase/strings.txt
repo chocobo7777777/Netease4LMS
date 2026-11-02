@@ -1,0 +1,525 @@
+# NetEase Cloud Music plugin for Lyrion Music Server
+
+PLUGIN_NETEASE
+	EN	NetEase Cloud Music
+	ZH_CN	网易云音乐
+
+PLUGIN_NETEASE_DESC
+	EN	Browse your NetEase Cloud Music playlists and stream tracks in Lyrion Music Server.
+	ZH_CN	在 Lyrion Music Server 中浏览网易云音乐歌单并在线播放。
+
+PLUGIN_NETEASE_LOGGED_IN_AS
+	EN	Logged in as: %s
+	ZH_CN	已登录：%s
+
+PLUGIN_NETEASE_NOT_LOGGED_IN
+	EN	Not logged in. Open the plugin settings to log in.
+	ZH_CN	未登录，请在插件设置页登录。
+
+PLUGIN_NETEASE_MY_PLAYLISTS
+	EN	My playlists
+	ZH_CN	我的歌单
+
+PLUGIN_NETEASE_DAILY_RECOMMEND
+	EN	Daily recommendations
+	ZH_CN	每日推荐
+
+PLUGIN_NETEASE_LIKED_SONGS
+	EN	Liked songs
+	ZH_CN	我喜欢的音乐
+
+PLUGIN_NETEASE_LIKED_PAGE
+	EN	Liked songs (%d-%d of %d)
+	ZH_CN	我喜欢的音乐（第 %d-%d 首，共 %d 首）
+
+PLUGIN_NETEASE_NEW_SONGS
+	EN	New songs
+	ZH_CN	推荐新歌
+
+PLUGIN_NETEASE_SEARCH
+	EN	Search songs
+	ZH_CN	搜索歌曲
+
+PLUGIN_NETEASE_SEARCH_EMPTY
+	EN	Type a song or artist name to search.
+	ZH_CN	请输入歌曲名或歌手名后搜索。
+
+PLUGIN_NETEASE_NO_RESULTS
+	EN	No matching songs found.
+	ZH_CN	没有找到相关歌曲。
+
+PLUGIN_NETEASE_LOGIN_REQUIRED
+	EN	This feature requires login. Please log in on the plugin settings page.
+	ZH_CN	该功能需要登录，请在插件设置页登录。
+
+PLUGIN_NETEASE_BACKEND_UNSUPPORTED
+	EN	This feature is only available with the API backend (not supported in direct mode).
+	ZH_CN	该功能仅 API 后端支持，直连模式暂不支持。
+
+PLUGIN_NETEASE_DOWNLOAD
+	EN	Download
+	ZH_CN	下载
+
+PLUGIN_NETEASE_NO_PLAYLISTS
+	EN	No playlists found for this account.
+	ZH_CN	该账号下没有找到歌单。
+
+PLUGIN_NETEASE_PLAYLIST_ITEM
+	EN	%s (%d tracks)
+	ZH_CN	%s（%d 首）
+
+PLUGIN_NETEASE_PLAYLIST_PAGE
+	EN	%s (%d-%d of %d)
+	ZH_CN	%s（第 %d-%d 首，共 %d 首）
+
+PLUGIN_NETEASE_EMPTY_PLAYLIST
+	EN	This playlist is empty.
+	ZH_CN	该歌单为空。
+
+PLUGIN_NETEASE_LOAD_FAILED
+	EN	Loading failed: %s
+	ZH_CN	加载失败：%s
+
+PLUGIN_NETEASE_UNPLAYABLE_ITEM
+	EN	%s (unplayable: %s)
+	ZH_CN	%s（不可播放：%s）
+
+PLUGIN_NETEASE_TRIAL_ONLY
+	EN	[trial]
+	ZH_CN	[试听]
+
+PLUGIN_NETEASE_REASON_VIP
+	EN	VIP membership required
+	ZH_CN	需要 VIP 会员
+
+PLUGIN_NETEASE_REASON_AUTH
+	EN	login expired, invalid Cookie, or VIP membership required
+	ZH_CN	Cookie 失效/未登录，或需要 VIP 会员
+
+PLUGIN_NETEASE_REASON_COPYRIGHT
+	EN	not available in this region or removed
+	ZH_CN	版权/地区限制或已下架
+
+PLUGIN_NETEASE_REASON_TRIAL
+	EN	trial clip only
+	ZH_CN	仅可试听片段
+
+PLUGIN_NETEASE_REASON_URL_EMPTY
+	EN	no stream URL returned
+	ZH_CN	接口未返回播放地址
+
+PLUGIN_NETEASE_REASON_NOT_FOUND
+	EN	song not found
+	ZH_CN	歌曲不存在
+
+PLUGIN_NETEASE_REASON_UNKNOWN
+	EN	unknown reason
+	ZH_CN	未知原因
+
+PLUGIN_NETEASE_DOWNLOAD_PLAYLIST
+	EN	Download this playlist
+	ZH_CN	下载此歌单
+
+PLUGIN_NETEASE_DOWNLOAD_TRACK_ITEM
+	EN	Download: %s
+	ZH_CN	下载：%s
+
+PLUGIN_NETEASE_DOWNLOAD_STARTED
+	EN	Download queued. Watch progress on the plugin's "Download queue" settings page.
+	ZH_CN	已加入下载队列，进度请打开插件设置中的“下载队列”页面查看。
+
+PLUGIN_NETEASE_STATUS
+	EN	Account status
+	ZH_CN	账号状态
+
+PLUGIN_NETEASE_STATUS_DESC
+	EN	Current login state of the NetEase plugin.
+	ZH_CN	网易云插件的当前登录状态。
+
+PLUGIN_NETEASE_BACKEND
+	EN	Backend
+	ZH_CN	后端模式
+
+PLUGIN_NETEASE_BACKEND_DESC
+	EN	NeteaseCloudMusicApi is the default and recommended backend. Direct mode is experimental and requires a Cookie.
+	ZH_CN	NeteaseCloudMusicApi 为默认推荐后端；直连模式为实验性功能，需要粘贴 Cookie。
+
+PLUGIN_NETEASE_BACKEND_API
+	EN	NeteaseCloudMusicApi (Node.js service)
+	ZH_CN	NeteaseCloudMusicApi（Node.js 服务）
+
+PLUGIN_NETEASE_BACKEND_DIRECT
+	EN	Direct weapi/eapi (experimental, Cookie only)
+	ZH_CN	直连 weapi/eapi（实验性，仅 Cookie）
+
+PLUGIN_NETEASE_API_BASE
+	EN	API base URL
+	ZH_CN	API 服务地址
+
+PLUGIN_NETEASE_API_BASE_DESC
+	EN	Base URL of the NeteaseCloudMusicApi service, for example http://127.0.0.1:3000.
+	ZH_CN	NeteaseCloudMusicApi 服务地址，例如 http://127.0.0.1:3000。
+
+PLUGIN_NETEASE_REAL_IP
+	EN	Public IP sent to NetEase (optional)
+	ZH_CN	发送给网易云的公网 IP（可选）
+
+PLUGIN_NETEASE_REAL_IP_DESC
+	EN	When NetEase reports "abnormal device environment", fill in your home broadband public IP here so the API sends it as X-Real-IP. Leave empty to let the API server decide.
+	ZH_CN	网易云提示“当前设备环境异常”时，在这里填写家庭宽带的公网 IP，API 会以 X-Real-IP 发送。留空则由 API 服务自行判断。
+
+PLUGIN_NETEASE_COOKIE
+	EN	Cookie
+	ZH_CN	Cookie
+
+PLUGIN_NETEASE_COOKIE_DESC
+	EN	Paste the cookie copied from music.163.com after login, preferably in the form MUSIC_U=xxxx. A bare MUSIC_U value is accepted too. It is stored in the plugin preferences and never written to the log.
+	ZH_CN	粘贴在 music.163.com 登录后复制的 Cookie，建议写成 MUSIC_U=xxxx；只粘贴 MUSIC_U 的值也可以。Cookie 保存在插件首选项中，不会写入日志。
+
+PLUGIN_NETEASE_UID
+	EN	User ID
+	ZH_CN	用户 ID
+
+PLUGIN_NETEASE_UID_DESC
+	EN	NetEase user id. Required by direct mode; it is filled automatically after a successful API-backend login.
+	ZH_CN	网易云用户 ID。直连模式必填；通过 API 后端登录成功后会自动填入。
+
+PLUGIN_NETEASE_LOGIN_MODE
+	EN	Login method
+	ZH_CN	登录方式
+
+PLUGIN_NETEASE_LOGIN_MODE_DESC
+	EN	Choose how to log in to NetEase.
+	ZH_CN	选择登录网易云的方式。
+
+PLUGIN_NETEASE_LOGIN_MODE_HINT
+	EN	QR code is recommended. Phone login may ask for a captcha. Direct mode requires a pasted Cookie.
+	ZH_CN	推荐扫码登录；手机号登录可能需要输入图形验证码；直连模式需要手动粘贴 Cookie。
+
+PLUGIN_NETEASE_LOGIN_MODE_QR
+	EN	QR code (recommended)
+	ZH_CN	扫码登录（推荐）
+
+PLUGIN_NETEASE_LOGIN_MODE_PHONE
+	EN	Phone number + password
+	ZH_CN	手机号 + 密码
+
+PLUGIN_NETEASE_LOGIN_MODE_DIRECT
+	EN	Direct mode (Cookie)
+	ZH_CN	直连模式（Cookie）
+
+PLUGIN_NETEASE_CAPTCHA
+	EN	Captcha
+	ZH_CN	验证码
+
+PLUGIN_NETEASE_CAPTCHA_DESC
+	EN	Enter the characters shown in the image, then click login again.
+	ZH_CN	请输入图片中的字符，然后再次点击登录。
+
+PLUGIN_NETEASE_CAPTCHA_REQUIRED
+	EN	Captcha required. Please enter the characters in the image and try again.
+	ZH_CN	需要验证码。请输入图片中的字符后重试。
+
+PLUGIN_NETEASE_CREDENTIALS_SAVED
+	EN	Login credentials are saved.
+	ZH_CN	登录凭据已保存。
+
+PLUGIN_NETEASE_PHONE
+	EN	Phone number
+	ZH_CN	手机号
+
+PLUGIN_NETEASE_PHONE_DESC
+	EN	Only supported with the NeteaseCloudMusicApi backend.
+	ZH_CN	仅在使用 NeteaseCloudMusicApi 后端时可用。
+
+PLUGIN_NETEASE_PASSWORD
+	EN	Password
+	ZH_CN	密码
+
+PLUGIN_NETEASE_PASSWORD_DESC
+	EN	Used only for the login request. It is not saved in preferences or logged.
+	ZH_CN	仅用于本次登录请求，不会保存到首选项，也不会写入日志。
+
+PLUGIN_NETEASE_LOGIN
+	EN	Log in with phone and password
+	ZH_CN	手机号 + 密码登录
+
+PLUGIN_NETEASE_VERIFY
+	EN	Verify Cookie / account
+	ZH_CN	验证 Cookie / 账号
+
+PLUGIN_NETEASE_LOGOUT
+	EN	Log out
+	ZH_CN	退出登录
+
+PLUGIN_NETEASE_LOGIN_OK
+	EN	Login succeeded.
+	ZH_CN	登录成功。
+
+PLUGIN_NETEASE_LOGIN_FAILED
+	EN	Login failed:
+	ZH_CN	登录失败：
+
+PLUGIN_NETEASE_LOGGED_OUT
+	EN	Logged out and local credentials cleared.
+	ZH_CN	已退出登录，并清除本地凭据。
+
+PLUGIN_NETEASE_VERIFY_OK
+	EN	Account verified.
+	ZH_CN	账号验证成功。
+
+PLUGIN_NETEASE_VERIFY_FAILED
+	EN	Verification failed:
+	ZH_CN	验证失败：
+
+PLUGIN_NETEASE_DIRECT_ONLY_COOKIE
+	EN	Phone/password login requires the NeteaseCloudMusicApi backend. Switch the backend or paste a Cookie.
+	ZH_CN	手机号/密码登录需要 NeteaseCloudMusicApi 后端。请切换后端或直接粘贴 Cookie。
+
+PLUGIN_NETEASE_QUALITY
+	EN	Streaming quality
+	ZH_CN	在线播放音质
+
+PLUGIN_NETEASE_QUALITY_DESC
+	EN	Requested quality level. If your account or the song does not allow it, playback automatically falls back to the next lower level (Lossless normally requires SVIP).
+	ZH_CN	请求的音质等级。账号或歌曲没有该音质权限时会自动降一档播放（无损通常需要 SVIP）。
+
+PLUGIN_NETEASE_Q_STANDARD
+	EN	Standard
+	ZH_CN	标准
+
+PLUGIN_NETEASE_Q_HIGHER
+	EN	Higher
+	ZH_CN	较高
+
+PLUGIN_NETEASE_Q_EXHIGH
+	EN	Extreme
+	ZH_CN	极高
+
+PLUGIN_NETEASE_Q_LOSSLESS
+	EN	Lossless
+	ZH_CN	无损
+
+PLUGIN_NETEASE_DOWNLOAD_DIR
+	EN	Download directory
+	ZH_CN	下载目录
+
+PLUGIN_NETEASE_DOWNLOAD_DIR_DESC
+	EN	Pick a folder from the list, use the autocomplete, or type an absolute path. Leave empty to use the first music folder plus "NetEase".
+	ZH_CN	可以从下拉列表选择目录、使用输入提示，或直接填写绝对路径。留空则使用音乐库第一个目录下的 NetEase 子目录。
+
+PLUGIN_NETEASE_DIR_PICK
+	EN	Select a folder...
+	ZH_CN	选择目录…
+
+PLUGIN_NETEASE_DOWNLOAD_QUALITY
+	EN	Download quality
+	ZH_CN	下载音质
+
+PLUGIN_NETEASE_DOWNLOAD_QUALITY_DESC
+	EN	Downloads use the same permission rules as playback, and fall back to the next lower level when the requested quality is unavailable.
+	ZH_CN	下载与播放受相同的权限限制；请求的音质不可用时会自动降一档。
+
+PLUGIN_NETEASE_DOWNLOAD_HINT
+	EN	Browse to "Download", choose a playlist, then either download the whole playlist or click a single track to download only that song. Files that already exist are skipped. CLI: "netease download playlist|track <id>".
+	ZH_CN	在浏览菜单进入“下载”，选择歌单后可以下载整张歌单，或点击其中任意单曲只下载该曲。已存在的文件会自动跳过。CLI："netease download playlist|track <id>"。
+
+PLUGIN_NETEASE_EFFECTIVE_DIR
+	EN	Effective download directory: %s
+	ZH_CN	实际下载目录：%s
+
+PLUGIN_NETEASE_EFFECTIVE_DIR_NONE
+	EN	No download directory configured and no music folder found. Downloads are disabled until a directory is set.
+	ZH_CN	未配置下载目录，也未找到音乐库目录。设置目录前下载不可用。
+
+PLUGIN_NETEASE_DIRECT_WARNING
+	EN	Direct mode is experimental: NetEase may change its web API or block the server IP at any time. If browsing or playback fails, switch back to NeteaseCloudMusicApi.
+	ZH_CN	直连模式为实验性功能：网易云可能随时更改网页接口或封禁服务器 IP。浏览或播放失败时请切回 NeteaseCloudMusicApi。
+
+PLUGIN_NETEASE_PASSWORD_NOT_SAVED
+	EN	For security, the password is not stored.
+	ZH_CN	出于安全考虑，密码不会被保存。
+
+PLUGIN_NETEASE_QR
+	EN	QR code login
+	ZH_CN	扫码登录
+
+PLUGIN_NETEASE_QR_DESC
+	EN	Log in by scanning a QR code with the NetEase Cloud Music mobile app. This usually works when password login is blocked by NetEase risk control.
+	ZH_CN	使用网易云音乐 App 扫码登录。密码登录被网易云风控拦截时通常可用。
+
+PLUGIN_NETEASE_QR_LOGIN
+	EN	Show QR code
+	ZH_CN	生成二维码
+
+PLUGIN_NETEASE_QR_CHECK
+	EN	I have scanned it
+	ZH_CN	我已扫码
+
+PLUGIN_NETEASE_QR_HINT
+	EN	Scan the QR code with the NetEase Cloud Music app, confirm on the phone, then click "I have scanned it".
+	ZH_CN	请用网易云音乐 App 扫码并在手机上确认，然后点击“我已扫码”。
+
+PLUGIN_NETEASE_QR_WAITING
+	EN	Waiting for scan.
+	ZH_CN	等待扫码。
+
+PLUGIN_NETEASE_QR_SCANNED
+	EN	QR code scanned. Please confirm the login on your phone, then click "I have scanned it" again.
+	ZH_CN	已扫码，请在手机上确认登录，然后再次点击“我已扫码”。
+
+PLUGIN_NETEASE_QR_EXPIRED
+	EN	QR code expired. Generate a new one.
+	ZH_CN	二维码已过期，请重新生成。
+
+PLUGIN_NETEASE_QR_FAILED
+	EN	QR login failed:
+	ZH_CN	扫码登录失败：
+
+PLUGIN_NETEASE_DLQ_TITLE
+	EN	Download queue
+	ZH_CN	下载队列
+
+PLUGIN_NETEASE_DLQ_DIR
+	EN	Download directory check
+	ZH_CN	下载目录检查
+
+PLUGIN_NETEASE_DLQ_DIR_DESC
+	EN	The absolute path the plugin actually writes to, the result of a real write test, and the identity the LMS process runs as.
+	ZH_CN	插件实际写入的绝对路径、真实写入测试的结果，以及 LMS 进程运行身份。
+
+PLUGIN_NETEASE_DLQ_DIR_OK
+	EN	Write test passed. Downloads can be saved here.
+	ZH_CN	写入测试通过，可以正常下载。
+
+PLUGIN_NETEASE_DLQ_DIR_CREATED
+	EN	Directory did not exist and was created automatically. Write test passed.
+	ZH_CN	目录原先不存在，已自动创建，写入测试通过。
+
+PLUGIN_NETEASE_DLQ_DIR_MISSING
+	EN	Directory does not exist and the LMS process cannot create it. Check that the path exists inside the server (container) and that its parent is writable.
+	ZH_CN	目录不存在，LMS 进程也无法创建。请确认该路径在服务器（容器）内真实存在，且其父目录可写。
+
+PLUGIN_NETEASE_DLQ_DIR_NOWRITE_MOUNT
+	EN	Permission bits say writable, but the actual write test failed. This is usually a read-only bind mount, an ACL, or NFS/CIFS root-squash.
+	ZH_CN	权限位显示可写，但真实写入失败。通常是只读的绑定挂载、ACL，或 NFS/CIFS 的 root-squash。
+
+PLUGIN_NETEASE_DLQ_DIR_OWNER
+	EN	Directory owner: %s, mode %s
+	ZH_CN	目录属主：%s，权限 %s
+
+PLUGIN_NETEASE_DLQ_DIR_RUNAS
+	EN	LMS process runs as: %s (uid %d, euid %d)
+	ZH_CN	LMS 进程运行身份：%s（uid %d，euid %d）
+
+PLUGIN_NETEASE_DLQ_DIR_HINT
+	EN	"Writable when checked as root" does not mean the music server can write. LMS writes files as its own uid, which may differ from root in a container; also check for read-only mounts and NAS root-squash.
+	ZH_CN	“用 root 检查能写”并不等于音乐服务器能写：LMS 是以自己的 uid 写文件，容器里的 uid 与 root 往往不同；另外还要确认不是只读挂载或 NAS 的 root-squash。
+
+PLUGIN_NETEASE_DLQ_DIR_NOWRITE
+	EN	Directory exists, but the LMS process has no write permission (write test failed).
+	ZH_CN	目录存在，但 LMS 进程没有写入权限（真实写入测试失败）。
+
+PLUGIN_NETEASE_DLQ_DIR_NONE
+	EN	No download directory configured and no music folder found. Downloads are disabled.
+	ZH_CN	未配置下载目录，也未找到音乐库目录，下载不可用。
+
+PLUGIN_NETEASE_DLQ_CURRENT
+	EN	Running
+	ZH_CN	正在下载
+
+PLUGIN_NETEASE_DLQ_PENDING
+	EN	Queued
+	ZH_CN	排队中
+
+PLUGIN_NETEASE_DLQ_HISTORY
+	EN	Finished
+	ZH_CN	历史任务
+
+PLUGIN_NETEASE_DLQ_EMPTY
+	EN	None
+	ZH_CN	无
+
+PLUGIN_NETEASE_DLQ_COL_JOB
+	EN	Job
+	ZH_CN	任务
+
+PLUGIN_NETEASE_DLQ_COL_TYPE
+	EN	Type
+	ZH_CN	类型
+
+PLUGIN_NETEASE_DLQ_COL_PROGRESS
+	EN	Progress
+	ZH_CN	进度
+
+PLUGIN_NETEASE_DLQ_COL_ITEM
+	EN	Current item
+	ZH_CN	当前曲目
+
+PLUGIN_NETEASE_DLQ_COL_MESSAGES
+	EN	Messages
+	ZH_CN	信息
+
+PLUGIN_NETEASE_DLQ_COL_QUEUED
+	EN	Queued at
+	ZH_CN	排队时间
+
+PLUGIN_NETEASE_DLQ_COL_STATUS
+	EN	Status
+	ZH_CN	状态
+
+PLUGIN_NETEASE_DLQ_COL_RESULT
+	EN	Result
+	ZH_CN	结果
+
+PLUGIN_NETEASE_DLQ_COL_FINISHED
+	EN	Finished at
+	ZH_CN	完成时间
+
+PLUGIN_NETEASE_DLQ_COUNTERS
+	EN	saved %d, skipped %d, failed %d
+	ZH_CN	已存 %d，跳过 %d，失败 %d
+
+PLUGIN_NETEASE_DLQ_CANCEL
+	EN	Cancel
+	ZH_CN	取消
+
+PLUGIN_NETEASE_DLQ_CANCELLING
+	EN	Cancelling after the current file finishes...
+	ZH_CN	已请求取消，当前文件完成后停止…
+
+PLUGIN_NETEASE_DLQ_CLEAR
+	EN	Clear history
+	ZH_CN	清空历史
+
+PLUGIN_NETEASE_DLQ_TYPE_ALL
+	EN	All playlists
+	ZH_CN	全部歌单
+
+PLUGIN_NETEASE_DLQ_TYPE_PLAYLIST
+	EN	Playlist
+	ZH_CN	歌单
+
+PLUGIN_NETEASE_DLQ_TYPE_TRACK
+	EN	Track
+	ZH_CN	单曲
+
+PLUGIN_NETEASE_DLQ_STATUS_QUEUED
+	EN	Queued
+	ZH_CN	排队中
+
+PLUGIN_NETEASE_DLQ_STATUS_RUNNING
+	EN	Running
+	ZH_CN	下载中
+
+PLUGIN_NETEASE_DLQ_STATUS_DONE
+	EN	Done
+	ZH_CN	已完成
+
+PLUGIN_NETEASE_DLQ_STATUS_ERROR
+	EN	Failed
+	ZH_CN	失败
+
+PLUGIN_NETEASE_DLQ_STATUS_CANCELLED
+	EN	Cancelled
+	ZH_CN	已取消

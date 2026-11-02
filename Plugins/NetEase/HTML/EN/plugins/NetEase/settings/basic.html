@@ -1,0 +1,148 @@
+[% PROCESS settings/header.html %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_STATUS" desc="PLUGIN_NETEASE_STATUS_DESC" %]
+		<div class="prefDesc">[% neteaseStatusText | html %]</div>
+		[% IF neteaseLoggedIn %]
+			<br>
+			<input type="submit" class="btn" name="doLogout" value="[% 'PLUGIN_NETEASE_LOGOUT' | string %]">
+		[% END %]
+		<div class="prefDesc" style="margin-top:6px">
+			<a href="/plugins/NetEase/settings/downloads.html">[% 'PLUGIN_NETEASE_DLQ_TITLE' | string %]</a>
+		</div>
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_BACKEND" desc="PLUGIN_NETEASE_BACKEND_DESC" %]
+		<select class="stdedit" name="pref_backend" id="pref_backend">
+			<option value="api" [% IF prefs.pref_backend != 'direct' %]selected="selected"[% END %]>
+				[% 'PLUGIN_NETEASE_BACKEND_API' | string %]
+			</option>
+			<option value="direct" [% IF prefs.pref_backend == 'direct' %]selected="selected"[% END %]>
+				[% 'PLUGIN_NETEASE_BACKEND_DIRECT' | string %]
+			</option>
+		</select>
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_API_BASE" desc="PLUGIN_NETEASE_API_BASE_DESC" %]
+		<input type="text" class="pref" size="60" name="pref_apiBase" value="[% prefs.pref_apiBase | html %]">
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_REAL_IP" desc="PLUGIN_NETEASE_REAL_IP_DESC" %]
+		<input type="text" class="pref" size="30" name="pref_realIP" value="[% prefs.pref_realIP | html %]">
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_LOGIN_MODE" desc="PLUGIN_NETEASE_LOGIN_MODE_DESC" %]
+		<select class="stdedit" name="neteaseLoginMode" id="neteaseLoginMode">
+			<option value="qr"     [% IF neteaseLoginMode == 'qr'     %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_LOGIN_MODE_QR'     | string %]</option>
+			<option value="phone"  [% IF neteaseLoginMode == 'phone'  %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_LOGIN_MODE_PHONE'  | string %]</option>
+			<option value="direct" [% IF neteaseLoginMode == 'direct' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_LOGIN_MODE_DIRECT' | string %]</option>
+		</select>
+		<div class="prefDesc">[% 'PLUGIN_NETEASE_LOGIN_MODE_HINT' | string %]</div>
+	[% END %]
+
+	[% # 非直连模式或已登录时，cookie/uid 用隐藏字段保留，避免表单提交时被清空。 %]
+	[% IF neteaseLoggedIn || neteaseLoginMode != 'direct' %]
+		<input type="hidden" name="pref_cookie" value="[% prefs.pref_cookie | html %]">
+		<input type="hidden" name="pref_uid" value="[% prefs.pref_uid | html %]">
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_QR" desc="PLUGIN_NETEASE_QR_DESC" %]
+		<div id="neteaseQrSection">
+			[% IF neteaseQrImage %]
+				<img src="[% neteaseQrImage | html %]" width="200" height="200" alt="QR">
+				<div class="prefDesc">[% 'PLUGIN_NETEASE_QR_HINT' | string %]</div>
+				<input type="submit" class="btn" name="qrCheck" value="[% 'PLUGIN_NETEASE_QR_CHECK' | string %]">
+			[% ELSE %]
+				<input type="submit" class="btn" name="qrLogin" value="[% 'PLUGIN_NETEASE_QR_LOGIN' | string %]">
+			[% END %]
+		</div>
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_PHONE" desc="PLUGIN_NETEASE_PHONE_DESC" %]
+		<div id="neteasePhoneSection">
+			<input type="text" class="pref" size="30" name="phone" value="" autocomplete="off">
+			<br>
+			<label for="password">[% 'PLUGIN_NETEASE_PASSWORD' | string %]</label>
+			<input type="password" class="pref" size="30" name="password" id="password" value="" autocomplete="off">
+			<div class="prefDesc">[% 'PLUGIN_NETEASE_PASSWORD_DESC' | string %]</div>
+			[% IF neteaseCaptchaImage %]
+				<br>
+				<img src="[% neteaseCaptchaImage | html %]" alt="captcha" style="vertical-align:middle;border:1px solid #ccc">
+				<input type="text" class="pref" size="10" name="captcha" value="" autocomplete="off">
+				<div class="prefDesc">[% 'PLUGIN_NETEASE_CAPTCHA_DESC' | string %]</div>
+			[% END %]
+			<br>
+			<input type="submit" class="btn" name="loginCellphone" value="[% 'PLUGIN_NETEASE_LOGIN' | string %]">
+		</div>
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_COOKIE" desc="PLUGIN_NETEASE_COOKIE_DESC" %]
+		<div id="neteaseDirectSection">
+			[% IF neteaseLoggedIn %]
+				<div class="prefDesc">[% 'PLUGIN_NETEASE_CREDENTIALS_SAVED' | string %]</div>
+			[% ELSE %]
+				<textarea name="pref_cookie" rows="4" cols="70">[% prefs.pref_cookie | html %]</textarea>
+				<div class="prefDesc">[% 'PLUGIN_NETEASE_PASSWORD_NOT_SAVED' | string %]</div>
+				<br>
+				<label for="pref_uid">[% 'PLUGIN_NETEASE_UID' | string %]</label>
+				<input type="text" class="pref" size="30" name="pref_uid" id="pref_uid" value="[% prefs.pref_uid | html %]">
+				<div class="prefDesc">[% 'PLUGIN_NETEASE_UID_DESC' | string %]</div>
+				<br>
+				<input type="submit" class="btn" name="verifyLogin" value="[% 'PLUGIN_NETEASE_VERIFY' | string %]">
+			[% END %]
+		</div>
+	[% END %]
+
+	<script type="text/javascript">
+		(function () {
+			var sel = document.getElementById('neteaseLoginMode');
+			if (!sel) return;
+			function apply() {
+				var mode = sel.value;
+				var qr = document.getElementById('neteaseQrSection');
+				var ph = document.getElementById('neteasePhoneSection');
+				var dr = document.getElementById('neteaseDirectSection');
+				if (qr) qr.style.display = (mode === 'qr')     ? '' : 'none';
+				if (ph) ph.style.display = (mode === 'phone')  ? '' : 'none';
+				if (dr) dr.style.display = (mode === 'direct') ? '' : 'none';
+			}
+			sel.onchange = apply;
+			apply();
+		})();
+	</script>
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_QUALITY" desc="PLUGIN_NETEASE_QUALITY_DESC" %]
+		<select class="stdedit" name="pref_quality" id="pref_quality">
+			<option value="standard" [% IF prefs.pref_quality == 'standard' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_STANDARD' | string %]</option>
+			<option value="higher"   [% IF prefs.pref_quality == 'higher' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_HIGHER' | string %]</option>
+			<option value="exhigh"   [% IF prefs.pref_quality == 'exhigh' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_EXHIGH' | string %]</option>
+			<option value="lossless" [% IF prefs.pref_quality == 'lossless' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_LOSSLESS' | string %]</option>
+		</select>
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_DOWNLOAD_DIR" desc="PLUGIN_NETEASE_DOWNLOAD_DIR_DESC" %]
+		<select class="stdedit" id="neteaseDirPick" onchange="if (this.value) { document.getElementById('pref_downloadDir').value = this.value; }">
+			<option value="">[% 'PLUGIN_NETEASE_DIR_PICK' | string %]</option>
+			[% FOREACH d IN neteaseDirChoices %]
+				<option value="[% d | html %]">[% d | html %]</option>
+			[% END %]
+		</select>
+		<br>
+		<input type="text" class="stdedit selectFolder" size="60" name="pref_downloadDir" id="pref_downloadDir" value="[% prefs.pref_downloadDir | html %]">
+		<div class="prefDesc">[% neteaseEffectiveDir | html %]</div>
+		<div class="prefDesc">[% 'PLUGIN_NETEASE_DOWNLOAD_HINT' | string %]</div>
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_DOWNLOAD_QUALITY" desc="PLUGIN_NETEASE_DOWNLOAD_QUALITY_DESC" %]
+		<select class="stdedit" name="pref_downloadQuality" id="pref_downloadQuality">
+			<option value="standard" [% IF prefs.pref_downloadQuality == 'standard' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_STANDARD' | string %]</option>
+			<option value="higher"   [% IF prefs.pref_downloadQuality == 'higher' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_HIGHER' | string %]</option>
+			<option value="exhigh"   [% IF prefs.pref_downloadQuality == 'exhigh' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_EXHIGH' | string %]</option>
+			<option value="lossless" [% IF prefs.pref_downloadQuality == 'lossless' %]selected="selected"[% END %]>[% 'PLUGIN_NETEASE_Q_LOSSLESS' | string %]</option>
+		</select>
+	[% END %]
+
+	[% WRAPPER setting title="" desc="" %]
+		<div class="prefDesc">[% 'PLUGIN_NETEASE_DIRECT_WARNING' | string %]</div>
+	[% END %]
+
+[% PROCESS settings/footer.html %]

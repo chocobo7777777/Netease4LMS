@@ -1,0 +1,130 @@
+[% PROCESS settings/header.html %]
+
+[% WRAPPER setting title="PLUGIN_NETEASE_DLQ_DIR" desc="PLUGIN_NETEASE_DLQ_DIR_DESC" %]
+	[% IF dlDirCheck.dir %]
+		<div class="prefDesc"><code>[% dlDirCheck.dir | html %]</code></div>
+		[% IF !dlDirCheck.writable %]
+			<div class="prefDesc"><b>[% dlDirCheck.statusText | html %]</b></div>
+		[% ELSE %]
+			<div class="prefDesc">[% dlDirCheck.statusText | html %]</div>
+		[% END %]
+		[% IF dlDirCheck.ownerText %]
+			<div class="prefDesc">[% dlDirCheck.ownerText | html %]</div>
+		[% END %]
+		<div class="prefDesc">[% dlDirCheck.runAsText | html %]</div>
+		[% IF !dlDirCheck.writable %]
+			<div class="prefDesc">[% 'PLUGIN_NETEASE_DLQ_DIR_HINT' | string %]</div>
+		[% END %]
+	[% ELSE %]
+		<div class="prefDesc"><b>[% 'PLUGIN_NETEASE_DLQ_DIR_NONE' | string %]</b></div>
+	[% END %]
+[% END %]
+
+[% WRAPPER setting title="PLUGIN_NETEASE_DLQ_CURRENT" desc="" %]
+	[% IF dlCurrent %]
+		<table cellpadding="4" cellspacing="0" width="100%">
+			<tr>
+				<td class="prefDesc" nowrap="nowrap">[% 'PLUGIN_NETEASE_DLQ_COL_JOB' | string %]</td>
+				<td>[% dlCurrent.labelText | html %] <span class="prefDesc">([% dlCurrent.typeText | html %] #[% dlCurrent.id %])</span></td>
+			</tr>
+			<tr>
+				<td class="prefDesc" nowrap="nowrap">[% 'PLUGIN_NETEASE_DLQ_COL_PROGRESS' | string %]</td>
+				<td>[% dlCurrent.progress %] &nbsp; <span class="prefDesc">[% dlCurrent.counters | html %]</span></td>
+			</tr>
+			[% IF dlCurrent.current %]
+				<tr>
+					<td class="prefDesc" nowrap="nowrap">[% 'PLUGIN_NETEASE_DLQ_COL_ITEM' | string %]</td>
+					<td>[% dlCurrent.current | html %]</td>
+				</tr>
+			[% END %]
+			[% IF dlCurrent.errors.size %]
+				<tr>
+					<td class="prefDesc" nowrap="nowrap" valign="top">[% 'PLUGIN_NETEASE_DLQ_COL_MESSAGES' | string %]</td>
+					<td>
+						[% FOREACH e IN dlCurrent.errors %]
+							<div class="prefDesc">[% e | html %]</div>
+						[% END %]
+					</td>
+				</tr>
+			[% END %]
+			<tr>
+				<td></td>
+				<td>
+					<button type="submit" class="btn" name="cancelJob" value="[% dlCurrent.id %]">[% 'PLUGIN_NETEASE_DLQ_CANCEL' | string %]</button>
+					[% IF dlCurrent.cancel %]<span class="prefDesc">[% 'PLUGIN_NETEASE_DLQ_CANCELLING' | string %]</span>[% END %]
+				</td>
+			</tr>
+		</table>
+	[% ELSE %]
+		<div class="prefDesc">[% 'PLUGIN_NETEASE_DLQ_EMPTY' | string %]</div>
+	[% END %]
+[% END %]
+
+[% WRAPPER setting title="PLUGIN_NETEASE_DLQ_PENDING" desc="" %]
+	[% IF dlPending.size %]
+		<table cellpadding="4" cellspacing="0" width="100%">
+			<tr class="prefDesc">
+				<th align="left">#</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_JOB' | string %]</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_TYPE' | string %]</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_QUEUED' | string %]</th>
+				<th></th>
+			</tr>
+			[% FOREACH job IN dlPending %]
+				<tr>
+					<td>[% job.id %]</td>
+					<td>[% job.labelText | html %]</td>
+					<td>[% job.typeText | html %]</td>
+					<td>[% job.queuedAtFmt %]</td>
+					<td><button type="submit" class="btn" name="cancelJob" value="[% job.id %]">[% 'PLUGIN_NETEASE_DLQ_CANCEL' | string %]</button></td>
+				</tr>
+			[% END %]
+		</table>
+	[% ELSE %]
+		<div class="prefDesc">[% 'PLUGIN_NETEASE_DLQ_EMPTY' | string %]</div>
+	[% END %]
+[% END %]
+
+[% WRAPPER setting title="PLUGIN_NETEASE_DLQ_HISTORY" desc="" %]
+	[% IF dlHistory.size %]
+		<table cellpadding="4" cellspacing="0" width="100%">
+			<tr class="prefDesc">
+				<th align="left">#</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_JOB' | string %]</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_STATUS' | string %]</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_PROGRESS' | string %]</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_RESULT' | string %]</th>
+				<th align="left">[% 'PLUGIN_NETEASE_DLQ_COL_FINISHED' | string %]</th>
+			</tr>
+			[% FOREACH job IN dlHistory %]
+				<tr>
+					<td>[% job.id %]</td>
+					<td>
+						[% job.labelText | html %]
+						[% IF job.errors.size %]
+							[% FOREACH e IN job.errors %]
+								<div class="prefDesc">[% e | html %]</div>
+							[% END %]
+						[% END %]
+					</td>
+					<td>[% job.statusText | html %]</td>
+					<td>[% job.progress %]</td>
+					<td class="prefDesc">[% job.counters | html %]</td>
+					<td>[% job.finishedAtFmt %]</td>
+				</tr>
+			[% END %]
+		</table>
+		<br>
+		<input type="submit" class="btn" name="clearHistory" value="[% 'PLUGIN_NETEASE_DLQ_CLEAR' | string %]">
+	[% ELSE %]
+		<div class="prefDesc">[% 'PLUGIN_NETEASE_DLQ_EMPTY' | string %]</div>
+	[% END %]
+[% END %]
+
+[% IF dlActive %]
+	<script type="text/javascript">
+		window.setTimeout(function () { location.reload(); }, 4000);
+	</script>
+[% END %]
+
+[% PROCESS settings/footer.html %]
