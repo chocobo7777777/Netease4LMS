@@ -70,21 +70,20 @@ sub _try_local_lrc {
 	$file_url =~ s/^tmp:/file:/ if $file_url;
 
 	if (!$file_url) {
-		$log->debug("_try_local_lrc bail: no file_url (track_id=@{[$trackId // '(undef)']} url=@{[$url // '(undef)']})") if $log->is_debug;
-		return;
+		$log->debug("_try_local_lrc bail: no file_url") if $log->is_debug;
+		return;  # undef = 不是本地文件，让 MAI fallback 正常处理
 	}
 
 	# 只处理本地文件 URL
 	if (!Slim::Music::Info::isFileURL($file_url)) {
-		# 非本地文件 URL（网易云代理流、HTTP 流等）→ 跳过。这种情况下后端/LMS fallback 会处理
 		$log->debug("_try_local_lrc bail: not fileURL ($file_url)") if $log->is_debug;
-		return;
+		return;  # undef = 不是本地文件，让 MAI fallback 正常处理
 	}
 
 	my $filePath = Slim::Utils::Misc::pathFromFileURL($file_url);
 	if (!$filePath || !-e $filePath) {
 		$log->debug("_try_local_lrc bail: file not exists ($filePath)") if $log->is_debug;
-		return;
+		return;  # undef = 音频文件都没了
 	}
 
 	# 和 MAI _getLocalLyrics 一致的查找顺序
@@ -97,37 +96,66 @@ sub _try_local_lrc {
 	$txt2 =~ s/\.lrc$/.txt/;
 	my @candidates = ($alt1, $alt2, $txt1, $txt2);
 
+	# 统计：有多少候选文件存在，其中多少是坏的
+	my $found_bad = 0;
+	my $found_any = 0;
+
 	for my $f (@candidates) {
 		if ($f && -r $f) {
+			$found_any++;
 			my $lyrics = eval { File::Slurp::read_file($f) };
 			if ($lyrics && length($lyrics)) {
 				utf8::decode($lyrics) unless utf8::is_utf8($lyrics);
 
-				# 校验：本地文件可能也是垃圾（如之前用我们插件下载时缓存了坏 JSON）
-				# 跳过不包含 [mm:ss.xx] 时间戳的文件，继续试下一个候选
-				if (!_is_valid_lrc($lyrics)) {
-					$log->debug("  skip $f: not valid LRC (no timestamps)") if $log->is_debug;
-					next;
+				if (_is_valid_lrc($lyrics)) {
+					$log->info("Found local lyrics: $f") if $log->is_info;
+					return { lyrics => $lyrics, blocked_mai => 0 };  # 成功
 				}
-
-				$log->info("Found local lyrics: $f") if $log->is_info;
-				return $lyrics;
+				else {
+					$found_bad++;
+					$log->debug("  skip $f: not valid LRC") if $log->is_debug;
+				}
 			}
 		}
 	}
 
-	$log->debug("_try_local_lrc bail: no .lrc/.txt beside $filePath") if $log->is_debug;
-	return;
+	if ($found_any > 0) {
+		# 有 .lrc/.txt 文件，但全是坏的 → 挡掉 MAI（MAI 也会读这些坏文件）
+		$log->info("Local lyric files found but all invalid (bad LRC JSON etc.). Blocking MAI fallback to avoid garbage.") if $log->is_info;
+		return { lyrics => undef, blocked_mai => 1 };
+	}
+
+	# 本地音频文件存在，但完全没有 .lrc/.txt 候选
+	# 这种情况 MAI _getLocalLyrics 也找不到 → 让 MAI 走在线查找
+	$log->debug("_try_local_lrc: no .lrc/.txt beside $filePath") if $log->is_debug;
+	return { lyrics => undef, blocked_mai => 0 };
 }
 
 # 验证一段文本是否是有效 LRC 歌词
 # 防止网易云后端返回"制作人员简介"等垃圾 JSON 被当成歌词
-# 判断标准：必须包含至少一个 [mm:ss.xx] 时间戳标记
+# 判断标准（按顺序）：
+#   1. 不含网易云后端特有的 JSON 结构 {"t":...,"tx":...} 或 {"t":...,"c":[...]}
+#   2. 至少 3 行 [mm:ss.xx] 时间戳
+#   3. 时间戳行占比 > 30%（排除极少数行有时间戳但全是 JSON 混着）
 sub _is_valid_lrc {
 	my ($text) = @_;
 	return 0 unless $text && length($text) > 0;
-	return 1 if $text =~ /\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/;
-	return 0;
+
+	# 快速拒绝：网易云后端 JSON 特征
+	if ($text =~ /\{"t":\d+.*?"tx":/s || $text =~ /\{"t":\d+.*?"c":\[/s) {
+		return 0;
+	}
+
+	# 统计时间戳行
+	my @ts_lines = ($text =~ m/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/gm);
+	return 0 unless @ts_lines >= 3;
+
+	# 时间戳占比
+	my @lines = split /\r?\n/, $text;
+	return 0 unless @lines > 0;
+	return 0 unless (scalar @ts_lines / scalar @lines) > 0.3;
+
+	return 1;
 }
 
 sub initPlugin {
@@ -198,28 +226,38 @@ sub initPlugin {
 		$log->debug("lyrics CLI request: track_id=[$trackId] url=[$url] title=[$title] artist=[$artist]") if $log->is_debug;
 
 		# === 1. 优先尝试本地 .lrc 文件 ===
-		# 绕开 Material Skin 传过来的 proxy http:// URL，
-		# 用 track_id 从 DB 拿原始 file:// 路径再找 .lrc。
-		# 本地 .lrc 优先：用户自己放的通常是精选/编辑过的。
-		if (my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist)) {
+		# 返回值：
+		#   undef                        → 非本地文件（让 MAI fallback 处理）
+		#   { lyrics => $text, blocked_mai => 0 } → 成功命中
+		#   { lyrics => undef, blocked_mai => 1 } → 本地 .lrc 存在但全坏了 → 挡掉 MAI
+		#   { lyrics => undef, blocked_mai => 0 } → 本地文件但无 .lrc → 让 MAI 走在线
+		my $local_res = _try_local_lrc($trackId, $url, $title, $artist);
+
+		# 成功命中好本地 .lrc
+		if ($local_res && ref($local_res) eq 'HASH' && $local_res->{lyrics}) {
 			$request->setStatusProcessing();
 
-			# 和网易云后端歌词一样处理时间戳：
-			# Material Skin 显式请求 timestamps:1 才保留 LRC 时间戳；
-			# 纯 HTTP 代理流（Radio）也去时间戳只留纯文本。
 			my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
 			my $radio_url = $url;
 			if ( !$want_ts || $radio_url =~ m{^https?://} ) {
-				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
-				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//g;
+				$local_res->{lyrics} =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
+				$local_res->{lyrics} =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//g;
 			}
 
-			$request->addResult('lyrics', $local_lrc) if length($local_lrc);
+			$request->addResult('lyrics', $local_res->{lyrics}) if length($local_res->{lyrics});
 			$request->setStatusDone();
 			return;
 		}
 
-		# === 2. 本地没找到 → 判断是否网易云轨道 ===
+		# 本地 .lrc 文件存在但全是坏的 → 直接返回空（MAI fallback 也会读坏文件）
+		if ($local_res && ref($local_res) eq 'HASH' && $local_res->{blocked_mai}) {
+			$log->info("Blocking MAI fallback: local lyric files all invalid") if $log->is_info;
+			$request->setStatusProcessing();
+			$request->setStatusDone();
+			return;
+		}
+
+		# === 2. 本地没命中（undef 或 blocked_mai=0）→ 判断是否网易云轨道 ===
 		# 网易云 song id 提取（多种格式都能抓到）
 		my $sid;
 		if ( $url =~ m{netease://track/(\d+)} ) {
