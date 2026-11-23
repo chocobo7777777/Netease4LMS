@@ -90,14 +90,14 @@ services:
 
 ### 4.1 放置插件
 
-把仓库 `Plugins/NetEase` 整个目录放进 LMS 的插件目录（Docker 部署通常是
-`/config/cache/Plugins/NetEase/`，对应宿主机 compose volume 映射下的路径），
+把仓库 `Plugins/NetEase` 整个目录放进 LMS 的插件目录。Docker 部署时，对应
+compose 里 `/config` 卷映射的宿主机路径下的 `cache/Plugins/NetEase/`。
 重启 LMS 后设置 → 插件应看到 **NetEase Cloud Music**。
 
 ### 4.2 第三方插件库（可选）
 
-`dist/` 下有可托管的 `NetEase-x.x.x.zip` 和 `repo.xml`。在任意 HTTP 静态服务
-（nginx / `python -m http.server` 等）暴露 `dist/`，然后 LMS → 设置 → 插件 →
+Release 里有打好的 `NetEase-x.x.x.zip` 和 `repo.xml`。在任意 HTTP 静态服务
+（nginx / `python -m http.server` 等）暴露这两个文件，然后 LMS → 设置 → 插件 →
 第三方插件库，填入 `repo.xml` 的完整 URL，勾选"使用不受支持的扩展"即可安装。
 
 > LMS 不支持 `file://`，必须是 HTTP(S)。
