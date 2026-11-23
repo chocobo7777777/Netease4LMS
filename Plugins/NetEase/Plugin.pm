@@ -539,13 +539,16 @@ sub initPlugin {
 	my $fetch_bio = sub {
 		my ($artistId) = @_;
 		return unless $artistId;
+
+		require JSON::XS;
+
 		my $cache_key = "netease_bio_$artistId";
 		my $cached = $cache->get($cache_key);
 		$cached = Encode::decode_utf8($cached) if defined $cached;
 		my ($name, $bio);
 		if ($cached) {
 			if ($cached =~ /^\{/) {
-				my $data = eval { from_json($cached) };
+				my $data = eval { JSON::XS::decode_json($cached) };
 				if ($data) { $name = $data->{name}; $bio = $data->{bio}; }
 			}
 			# 旧缓存可能只是纯 bio 字符串
@@ -556,7 +559,7 @@ sub initPlugin {
 			if ( $json && $json->{artist} && $json->{artist}{briefDesc} ) {
 				$name = $json->{artist}{name} if $json->{artist}{name};
 				$bio = $json->{artist}{briefDesc};
-				my $bytes = Encode::encode_utf8( to_json({name => $name || '', bio => $bio}) );
+				my $bytes = Encode::encode_utf8( JSON::XS::encode_json({name => $name || '', bio => $bio}) );
 				$cache->set( $cache_key, $bytes );
 			}
 		}
