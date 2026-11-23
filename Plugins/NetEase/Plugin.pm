@@ -96,7 +96,7 @@ sub _try_local_lrc {
 	$txt2 =~ s/\.lrc$/.txt/;
 	my @candidates = ($alt1, $alt2, $txt1, $txt2);
 
-	# 统计：有多少候选文件存在，其中多少是坏的
+	# 统计：有多少候选文件存在，其中多少不合法
 	my $found_bad = 0;
 	my $found_any = 0;
 
@@ -108,8 +108,10 @@ sub _try_local_lrc {
 				utf8::decode($lyrics) unless utf8::is_utf8($lyrics);
 
 				if (_is_valid_lrc($lyrics)) {
+					# 网易云 JSON 格式 → 转成普通 LRC 再返回
+					$lyrics = _convert_netease_json_to_lrc($lyrics) if _has_netease_json_lrc($lyrics);
 					$log->info("Found local lyrics: $f") if $log->is_info;
-					return { lyrics => $lyrics, blocked_mai => 0 };  # 成功
+					return $lyrics;
 				}
 				else {
 					$found_bad++;
@@ -119,32 +121,82 @@ sub _try_local_lrc {
 		}
 	}
 
-	if ($found_any > 0) {
-		# 有 .lrc/.txt 文件，但全是坏的 → 挡掉 MAI（MAI 也会读这些坏文件）
-		$log->info("Local lyric files found but all invalid (bad LRC JSON etc.). Blocking MAI fallback to avoid garbage.") if $log->is_info;
-		return { lyrics => undef, blocked_mai => 1 };
-	}
-
-	# 本地音频文件存在，但完全没有 .lrc/.txt 候选
-	# 这种情况 MAI _getLocalLyrics 也找不到 → 让 MAI 走在线查找
-	$log->debug("_try_local_lrc: no .lrc/.txt beside $filePath") if $log->is_debug;
-	return { lyrics => undef, blocked_mai => 0 };
+	$log->debug("_try_local_lrc: found_any=$found_any found_bad=$found_bad no valid .lrc/.txt") if $log->is_debug;
+	return;
 }
 
-# 验证一段文本是否是有效 LRC 歌词
-# 防止网易云后端返回"制作人员简介"等垃圾 JSON 被当成歌词
-# 判断标准（按顺序）：
-#   1. 不含网易云后端特有的 JSON 结构 {"t":...,"tx":...} 或 {"t":...,"c":[...]}
-#   2. 至少 3 行 [mm:ss.xx] 时间戳
-#   3. 时间戳行占比 > 30%（排除极少数行有时间戳但全是 JSON 混着）
+# 检测文本是否包含网易云格式化歌词（JSON 格式，{"t":毫秒,"c":[{tx":"文本"}]}）
+# 这种格式 Material Skin 前端能解析，但 MAI 后端 strip() 不会处理
+# 我们在服务端把它转成普通 LRC 或纯文本
+sub _has_netease_json_lrc {
+	my ($text) = @_;
+	return 0 unless $text && length($text) > 0;
+	return 1 if $text =~ /\{"t":\d+.*?"c":\[/s || $text =~ /\{"t":\d+.*?"tx":/s;
+	return 0;
+}
+
+# 把网易云 JSON 格式歌词转成普通 LRC
+# 网易云格式: {"t":毫秒, "c":[{"tx":"文本1"}, {"tx":"文本2"}]}
+#    - t = 该行起始毫秒数
+#    - c[].tx = 显示文本（可能有多段，冒号分隔制作人和内容）
+# 转换: [mm:ss.xx] 所有 tx 合并（非空的用 " - " 或直接冒号拼接）
+sub _convert_netease_json_to_lrc {
+	my ($text) = @_;
+	return $text unless _has_netease_json_lrc($text);
+
+	require JSON::XS;
+
+	my @lrc_lines;
+	for my $line (split /\r?\n/, $text) {
+		next unless $line =~ /\{"t":(\d+)/;
+		my $ms = $1;
+
+		my $parsed = eval { JSON::XS::decode_json($line) };
+		next unless $parsed && ref($parsed) eq 'HASH';
+
+		# 收集所有 tx 文本
+		my @texts;
+		if ($parsed->{c} && ref($parsed->{c}) eq 'ARRAY') {
+			for my $seg (@{ $parsed->{c} }) {
+				push @texts, $seg->{tx} if ref($seg) eq 'HASH' && defined $seg->{tx} && length($seg->{tx}) > 0;
+			}
+		}
+
+		next unless @texts;
+
+		# 合并多段文本："标题: 内容" 或 "文本1 文本2"
+		my $joined;
+		if (@texts == 2 && $texts[0] =~ /[\(\)：:]/) {
+			# "Composer:" + "田汨@..." → "Composer: 田汨@..."
+			$joined = join('', @texts);
+		}
+		else {
+			$joined = join(' ', @texts);
+		}
+
+		# 毫秒 → [mm:ss.xx]
+		my $total_sec = int($ms / 1000);
+		my $ms_part = sprintf('%03d', $ms % 1000);
+		my $mm = int($total_sec / 60);
+		my $ss = $total_sec % 60;
+		my $ts = sprintf('[%.2d:%.2d.%.2d]', $mm, $ss, substr($ms_part, 0, 2));
+
+		push @lrc_lines, "$ts$joined";
+	}
+
+	return join("\n", @lrc_lines) if @lrc_lines;
+	return $text;  # 解析失败就返回原文
+}
+
+# 验证歌词文本是否包含有效时间戳
+# 纯 JSON 格式 → 还没转换 → 暂时算有效（转换后会有时间戳）
+# 要求至少 3 行时间戳（转换后或原生）
 sub _is_valid_lrc {
 	my ($text) = @_;
 	return 0 unless $text && length($text) > 0;
 
-	# 快速拒绝：网易云后端 JSON 特征
-	if ($text =~ /\{"t":\d+.*?"tx":/s || $text =~ /\{"t":\d+.*?"c":\[/s) {
-		return 0;
-	}
+	# 纯网易云 JSON → 还没转换，暂时算有效
+	return 1 if _has_netease_json_lrc($text);
 
 	# 统计时间戳行
 	my @ts_lines = ($text =~ m/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/gm);
@@ -227,37 +279,26 @@ sub initPlugin {
 
 		# === 1. 优先尝试本地 .lrc 文件 ===
 		# 返回值：
-		#   undef                        → 非本地文件（让 MAI fallback 处理）
-		#   { lyrics => $text, blocked_mai => 0 } → 成功命中
-		#   { lyrics => undef, blocked_mai => 1 } → 本地 .lrc 存在但全坏了 → 挡掉 MAI
-		#   { lyrics => undef, blocked_mai => 0 } → 本地文件但无 .lrc → 让 MAI 走在线
-		my $local_res = _try_local_lrc($trackId, $url, $title, $artist);
+		#   字符串 → 成功命中（可能已转换 JSON→LRC）
+		#   undef  → 没找到或非本地文件 → 走网易云后端 / MAI fallback
+		my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist);
 
-		# 成功命中好本地 .lrc
-		if ($local_res && ref($local_res) eq 'HASH' && $local_res->{lyrics}) {
+		if ($local_lrc && length($local_lrc)) {
 			$request->setStatusProcessing();
 
 			my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
 			my $radio_url = $url;
 			if ( !$want_ts || $radio_url =~ m{^https?://} ) {
-				$local_res->{lyrics} =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
-				$local_res->{lyrics} =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//g;
+				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
+				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//g;
 			}
 
-			$request->addResult('lyrics', $local_res->{lyrics}) if length($local_res->{lyrics});
+			$request->addResult('lyrics', $local_lrc) if length($local_lrc);
 			$request->setStatusDone();
 			return;
 		}
 
-		# 本地 .lrc 文件存在但全是坏的 → 直接返回空（MAI fallback 也会读坏文件）
-		if ($local_res && ref($local_res) eq 'HASH' && $local_res->{blocked_mai}) {
-			$log->info("Blocking MAI fallback: local lyric files all invalid") if $log->is_info;
-			$request->setStatusProcessing();
-			$request->setStatusDone();
-			return;
-		}
-
-		# === 2. 本地没命中（undef 或 blocked_mai=0）→ 判断是否网易云轨道 ===
+		# === 2. 本地没命中 → 判断是否网易云轨道 ===
 		# 网易云 song id 提取（多种格式都能抓到）
 		my $sid;
 		if ( $url =~ m{netease://track/(\d+)} ) {
@@ -341,6 +382,9 @@ sub initPlugin {
 		# 直接塞 LRC 字符串（和 MAI 原始 handler 格式一致）
 		# Material Skin 期望 result.lyrics 是字符串 → 传给 formatLyrics() 解析
 		my $lrc_text = $lyric->{lrc} || '';
+
+		# 网易云后端可能返回 JSON 格式的歌词 → 服务端转成普通 LRC
+		$lrc_text = _convert_netease_json_to_lrc($lrc_text) if _has_netease_json_lrc($lrc_text);
 
 		# 如果请求没要 timestamps（或有 url 参数说明是电台流），去时间戳只留纯文本
 		my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
