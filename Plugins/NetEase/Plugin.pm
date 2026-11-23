@@ -269,16 +269,22 @@ sub initPlugin {
 		# 不是网易云 → 看 overrideMAI 设置
 		if ( !$sid ) {
 			if ( $prefs->get('overrideMAI') ) {
-				# 完全接管：非网易云也不走 MAI
-				$request->setStatusDone();
+				# 完全接管：主动搜网易云
+				$sid = $search_track_id->($title, $artist);
+				if ( !$sid ) {
+					# 网易云也搜不到 → 返回空
+					$request->setStatusDone();
+					return;
+				}
+			}
+			else {
+				# 动态转给 MAI 原始 handler
+				if ( Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI') ) {
+					return Plugins::MusicArtistInfo::TrackInfo::getSongLyricsCLI($request);
+				}
+				$request->setStatusBadDispatch();
 				return;
 			}
-			# 动态转给 MAI 原始 handler
-			if ( Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI') ) {
-				return Plugins::MusicArtistInfo::TrackInfo::getSongLyricsCLI($request);
-			}
-			$request->setStatusBadDispatch();
-			return;
 		}
 
 		# === 网易云曲目：走自建后端拿歌词 ===
@@ -489,6 +495,25 @@ sub initPlugin {
 	};
 
 	# 从网易云搜索 API 兜底找 artist_id（单个）
+	my $search_track_id = sub {
+		my ($title, $artist) = @_;
+		return unless $title;
+		my $kw = $artist ? "$artist $title" : $title;
+		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($kw) . "&type=1&limit=3");
+		if ( $json && $json->{result} && $json->{result}{songs} && @{ $json->{result}{songs} || [] } ) {
+			# 挑艺人名匹配的
+			if ($artist) {
+				for my $hit ( @{ $json->{result}{songs} } ) {
+					my @hits = @{ $hit->{artists} || [] };
+					for my $a (@hits) {
+						return $hit->{id} if index($a->{name}, $artist) >= 0 || index($artist, $a->{name}) >= 0;
+					}
+				}
+			}
+			return $json->{result}{songs}[0]{id};
+		}
+		return;
+	};
 	my $search_artist_id = sub {
 		my ($name, $trackTitle) = @_;
 		return unless $name;
