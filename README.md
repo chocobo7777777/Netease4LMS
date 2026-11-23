@@ -6,9 +6,55 @@ Squeezebox Server）插件，用于浏览网易云音乐账号下的歌单、在
 
 插件目录名：`NetEase`，模块命名空间：`Plugins::NetEase::*`。
 
+安装后 LMS 中的位置：`设置 → 插件 → NetEase Cloud Music`；浏览入口：
+`我的应用 / My Apps → 网易云音乐`。
+
 ---
 
-## 1. 目录结构
+## 1. 功能特性
+
+- **账号登录**：手机号 + 密码、扫码登录（需 API 后端），或手动粘贴 Cookie
+  （两种后端均可）。登录状态保存在 LMS 插件 prefs（`plugin.netease`）中，
+  支持一键退出登录。
+- **歌单浏览**：`网易云音乐 → 我的歌单 → 歌单 → 曲目`，显示歌单名、封面、
+  曲目数；歌单超过 1000 首时自动拆成每页 1000 首的分页入口，每页可整页播放。
+- **个性化入口**（登录后）：`每日推荐`、`我喜欢的音乐`（红心歌曲；超过 300 首
+  自动拆成多个分页入口，每页可整页播放），均以普通曲目菜单展示，可直接在线播放。
+- **无需登录的入口**：`推荐新歌`（30 首）与 `搜索歌曲`（支持歌名/歌手名关键词，
+  返回前 30 条结果）。
+- **在线播放**：曲目以 `netease://track/<songId>` 进入 LMS 播放链路，播放前解析
+  真实音频 URL 后交给 LMS 的 HTTPS 处理器，播放/暂停/seek/重定向复用 LMS 核心实现。
+- **不可播放提示**：菜单会提前解析 URL；没有 URL 的曲目显示为不可播放文本项，
+  并标注原因（VIP、版权/地区限制、仅可试听、Cookie 失效等）。
+- **下载**：浏览菜单"下载 → 歌单 → 曲目"按需选择，可整张歌单下载，也可只下单曲；
+  支持 CLI / JSON-RPC 触发。文件命名、目录结构、跳过已存在文件、临时文件、
+  失败重试均已实现。
+- **条目级下载动作**：歌单条目与曲目条目额外挂载了 LMS 条目动作
+  （`jive.actions`），分别对应"下载此歌单"和"下载这首歌"，命令复用下面的
+  `netease download playlist|track <id>`；每日推荐、我喜欢的音乐、推荐新歌这类
+  **没有歌单 ID 的内置入口**同样挂载"下载此歌单"，命令为
+  `netease download feed daily|liked|new`。是否能看到入口取决于客户端/皮肤是否
+  渲染自定义条目动作，详见 7.1 与第 10 节。
+- **下载队列监控页**：`设置 → 插件 → 下载队列` 实时显示当前任务进度
+  （已处理/总数、已存/跳过/失败计数）、排队任务、最近 30 条历史及错误信息；
+  支持取消排队/运行中的任务、清空历史，有任务活动时页面每 4 秒自动刷新。
+- **网易云曲目"正在播放"页信息**：对 Material Skin 等客户端的"正在播放"页，
+  网易云曲目的 **歌词**、**艺术家简介**、**专辑介绍** 直接从网易云获取，替代
+  MAI（MusicArtistInfo）插件的维基百科/在线搜索链路，更准确且不再超时：
+  - **歌词**：调自建后端 `/lyric?id=<songId>`，返回 LRC 原文 + 翻译；
+  - **艺术家简介**：调 `/artists?id=<artist_id>`，取 `briefDesc`；支持多艺人曲目，
+    每个艺人分别查并拼接；
+  - **专辑介绍**：调 `/album?id=<album_id>`，取 `description`；
+  - **维基屏蔽**：workreview / artistphoto / artistphotos / albumcovers 对网易云
+    曲目直接返回空（网易云没有对应 API，也避免维基请求卡死 LMS）。
+  - 所有非网易云曲目透明 fallback 给 MAI 原始 handler，完全不影响 MAI 功能。
+  - 实现方式是 initPlugin 中 **override MAI 的 CLI 命令**（`addDispatch` 替换
+    `musicartistinfo lyrics|biography|albumreview|...`），绕过 Material Skin 前端
+    硬编码的 MAI CLI 调用。详情见 7.5 节。
+
+---
+
+## 2. 目录结构
 
 ```text
 Netease4LMS/
@@ -31,125 +77,36 @@ Netease4LMS/
                             └── downloads.html   # 下载队列监控页模板
 ```
 
-安装后 LMS 中的位置：`设置 → 插件 → NetEase Cloud Music`；浏览入口：
-`我的应用 / My Apps → 网易云音乐`。
-
 ---
 
-## 2. 功能范围
+## 3. 两种后端模式
 
-已实现：
+插件支持两种对接网易云音乐的方式，在设置页 `Backend` 中切换。两种模式不会
+自动互相回退。
 
-- 插件可被 LMS 识别：`install.xml`、`Plugin.pm`、`Settings.pm`、`strings.txt`、
-  设置页模板齐全。
-- 账号登录：
-  - 后端模式：手机号 + 密码登录、扫码登录（通过 NeteaseCloudMusicApi）；
-  - 任意模式：手动粘贴 Cookie 登录；
-  - 登录状态保存在 LMS 插件 prefs（`plugin.netease`）中；
-  - 设置页“退出登录”会清除本地 Cookie、UID、昵称，并尝试调用后端 `/logout`。
-- 歌单浏览：`网易云 → 我的歌单 → 歌单 → 曲目`，显示歌单名、封面、曲目数；
-  歌单超过 1000 首时自动拆成每页 1000 首的分页入口，每页可整页播放。
-- 登录后的个性化入口：`每日推荐`、`我喜欢的音乐`（红心歌曲；超过 300 首时
-  自动拆成多个分页入口，每页可整页播放，不再只显示最近 1000 首），
-  均以普通曲目菜单展示，可直接在线播放。
-- 未登录也可用的公开入口：`推荐新歌`（30 首）与 `搜索歌曲`（关键词只支持歌名/歌手名，
-  返回前 30 条结果）。
-- 在线播放：曲目以 `netease://track/<songId>` 进入 LMS 播放链路，
-  `Plugins::NetEase::ProtocolHandler` 在播放前解析真实音频 URL，再交给 LMS
-  的 HTTPS 协议处理器，因此播放/暂停/seek/重定向复用 LMS 核心实现。
-- 不可播放提示：菜单会提前解析 URL；没有 URL 的曲目显示为不可播放文本项，
-  并标注原因（VIP、版权/地区限制、仅可试听、Cookie 失效等）。
-- 下载：浏览菜单“下载 → 歌单 → 曲目”按需选择，可整张歌单下载，也可点单曲只下这一首；
-  也支持 CLI。文件命名、目录结构、跳过已存在文件、临时文件、失败重试均已实现。
-- 下载队列监控页：`设置 → 插件 → 下载队列`（或设置页顶部“下载队列”链接）实时显示
-  当前任务进度（已处理/总数、已存/跳过/失败计数）、排队任务、最近 30 条历史及每条
-  任务的错误信息；支持取消排队/运行中的任务、清空历史，有任务活动时页面每 4 秒自动刷新。
+### A. NeteaseCloudMusicApi（默认）
 
-未实现（有意留到后续）：
+插件通过 HTTP 调用本地运行的 NeteaseCloudMusicApi Node.js 服务（详见 4.2 节），
+由该服务完成网易云网页接口的加密/签名、Cookie 管理和播放地址解析。推荐使用社区
+维护的 Enhanced 版（接口与原版完全一致）：
 
-- 专辑/歌手浏览、私人 FM、喜欢/取消喜欢等写操作；
-- 短信验证码登录；
-- 歌词、封面嵌入、ID3/FLAC 标签写入；
-- 自动把下载目录加入音乐库并触发扫描。
+- 支持手机号+密码、扫码、Cookie 三种登录方式；
+- 播放地址按 `standard/higher/exhigh/lossless` 请求音质，并返回试听/VIP 等信息，
+  便于在菜单中解释"为什么不能播"；
+- 歌单曲目分页拉取，不受单次 1000 首截断影响。
 
----
+### B. 直连网页接口（实验性）
 
-## 3. 两种网易云接法：选型与风险
+不依赖 Node.js，直接用 Cookie 请求 `music.163.com` 的旧版 `/api/...` 接口：
 
-### A. NeteaseCloudMusicApi（默认，推荐，建议用 Enhanced 维护版）
+- 仅支持**手动粘贴 Cookie**，且必须手动填写 UID（网易云个人主页 URL 中的数字 ID）；
+- 仅保留歌单浏览和播放；`每日推荐`、`我喜欢的音乐`、`推荐新歌`、`搜索歌曲`
+  仅 API 后端可用；
+- 旧接口的可用性和音质上限不如 API 后端稳定。
 
-插件通过 HTTP 调用本地运行的 NeteaseCloudMusicApi Node.js 服务，由该服务完成网易云
-网页接口的加密/签名、Cookie 管理和播放地址解析。
-
-原版 [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)
-的 GitHub 仓库已停止更新，推荐改用社区维护的接续项目
-[NeteaseCloudMusicApiEnhanced/api-enhanced](https://github.com/neteasecloudmusicapienhanced/api-enhanced)。
-它是原版的分支重构，**接口路径和返回结构与原版一致**，插件无需改动即可切换：
-
-- 相关接口都存在：`/login/cellphone`、`/login/status`、`/login/qr/key|create|check`、
-  `/logout`、`/user/playlist`、`/playlist/detail`、`/playlist/track/all`、
-  `/song/detail`、`/song/url/v1`；
-- `/login/status` 仍返回 `{ data: { code, account, profile } }`，与本插件的解析逻辑一致；
-- 仍支持 `realIP` 参数（扫码登录的风控绕过仍可用）；
-- 默认端口仍是 `3000`，Docker 镜像为 `moefurina/ncm-api:latest`。
-
-需要注意的一处差异：Enhanced 版在**未登录**时，`/login/status` 也会返回一个
-`type=1000` 的匿名 `account`（带 id、`profile` 为 `null`）。插件从 0.1.9 起只以
-`profile.userId` 判定是否登录，因此不会把匿名账号误判成“登录成功”。
-
-选择它作为默认实现的原因：
-
-- 登录、Cookie、`weapi/eapi` 加密、`song/url/v1` 等复杂逻辑由成熟项目处理，
-  插件本身只需发普通 HTTP 请求，代码量和维护成本最低。
-- 支持手机号+密码、扫码登录，能拿到 `Set-Cookie`，也支持直接用 Cookie 调
-  `/login/status` 验证账号。
-- `/song/url/v1` 能按 `standard/higher/exhigh/lossless` 请求音质，并返回
-  `freeTrialInfo`、`fee`、`code` 等信息，便于在菜单中解释“为什么不能播”。
-- `/playlist/track/all` 支持 `limit/offset`，但单次最多返回 1000 首；插件按每页
-  1000 首（红心 300 首）分页展示，整单下载时逐页拉全量，因此不受 1000 首截断影响。
-
-风险：
-
-- 需要额外运行一个 Node.js 服务；服务停止时插件只能读缓存/报错。
-- 后端仍是第三方项目，可能停止维护；网易云接口变化时可能失效。原版 GitHub 仓库已停更，
-  所以建议用 Enhanced 维护版（见上）。
-- Enhanced 版默认开箱带“全局解灰”（`ENABLE_GENERAL_UNBLOCK`）：对无播放地址、仅试听或
-  VIP 歌曲，会用第三方音源（QQ/酷我/酷狗/咪咕等）补一个 URL。开启后菜单里原本标为
-  “不可播放”的曲目可能变得可播，但音源不再是网易云官方，可用性和合规性需自行判断；
-  想保持与原版一致的行为，启动时设 `ENABLE_GENERAL_UNBLOCK=false`。
-- 手机号+密码登录可能被网易云风控拦截（`code:400`，提示“检测到当前登录存在安全
-  风险”）；插件已提供扫码登录作为替代，仍失败时使用 Cookie。
-- 扫码登录在旧版 Binaryify（Docker 镜像 `binaryify/netease_cloud_music_api` 内置的
-  4.27.0，启动时会提示升级）上很容易被拦截（“当前设备环境异常”，源于网易云对二维码/
-  设备指纹的判定）；换用 Enhanced 新版后端后该问题大概率消失，仍失败时可填公网 IP
-  或用 Cookie 兜底。
-- 如果 API 服务暴露在公网且没有鉴权，任何能访问它的人都可能操作你的网易云账号；
-  建议只监听 `127.0.0.1`，或放在带认证的反向代理后面。
-
-### B. 直连网页接口（实验性，可配置）
-
-插件也可以切换为 `direct` 模式，直接用 Cookie 请求 `music.163.com` 的
-`/api/...` 旧版接口，不依赖 Node.js。
-
-已验证可用的直连接口：
-
-- `/api/user/playlist?uid=...`：用户歌单；
-- `/api/v6/playlist/detail?id=...`：歌单详情，返回 `tracks` 和 `trackIds`；
-- `/api/song/detail?ids=[...]`：歌曲详情；
-- `/api/song/enhance/player/url?ids=[...]&br=...`：播放地址（未登录返回 `code=-110`）。
-
-为什么它是实验性：
-
-- 登录需要网页 `weapi` 加密，插件没有实现加密逻辑，所以直连模式只支持
-  **手动粘贴 Cookie**，并且必须手动填写 UID。
-- 旧版 `/api/song/enhance/player/url` 的可用性、码率上限、风控策略不如
-  `song/url/v1` 稳定；无损/高码率可能拿不到。
-- 没有可靠的“当前登录用户”接口，设置页的“验证”只能以“能否取到该 UID 的歌单”
-  作为最佳努力校验，不能严格证明 Cookie 有效。
-- 网易云可能随时下线旧接口或封禁服务器 IP。
-
-默认使用 A；在设置页把 `Backend` 改成 `Direct weapi/eapi (experimental)` 即切换到 B。
-两种模式不会自动互相回退，避免在未提示的情况下改变凭据使用方式。
+> 提示：Enhanced 版 API 默认开启"全局解灰"（`ENABLE_GENERAL_UNBLOCK`），会用第三方
+> 音源为 VIP/试听/无地址歌曲补播放地址。想只使用网易云官方音源，启动 API 时设
+> `ENABLE_GENERAL_UNBLOCK=false`。
 
 ---
 
@@ -173,12 +130,12 @@ Netease4LMS/
 
 3. 重启 LMS（Windows 服务/托盘程序均可）。
 4. 打开 LMS Web 界面：`设置 → 插件`，应能看到 **NetEase Cloud Music**，
-   状态为 enabled；如果没有，先点“刷新/重新扫描插件”，再检查 `server.log`
+   状态为 enabled；如果没有，先点"刷新/重新扫描插件"，再检查 `server.log`
    中是否有 `netease` 相关报错。
 
 #### Docker（lmscommunity/lyrionmusicserver 镜像）
 
-LMS 没有“上传插件”的 Web 界面；Docker 安装时把插件放进容器内
+LMS 没有"上传插件"的 Web 界面；Docker 安装时把插件放进容器内
 `/config/cache/Plugins/NetEase/` 即可（该目录在 `/config` 持久化卷里，
 重建容器后仍保留）。两种做法任选其一：
 
@@ -211,7 +168,7 @@ Docker 下还有两个配置要改：
         # 用 NAS IP 访问时必须有这一行；LMS 与 ncmapi 已在同一 network 并直接用服务名时可省略
         - "3000:3000"
       environment:
-        # 关闭“全局解灰”，只使用网易云官方音源，行为与原版一致
+        # 关闭"全局解灰"，只使用网易云官方音源，行为与原版一致
         # 想尽量让 VIP/试听/无地址歌曲可播，可改成 "true"（音源来自第三方）
         ENABLE_GENERAL_UNBLOCK: "false"
   ```
@@ -220,7 +177,7 @@ Docker 下还有两个配置要改：
   **前提**：LMS 与 API 必须加入同一个 Docker 网络，容器内能解析该服务名；否则请直接填
   NAS 的局域网 IP。排查命令：`docker exec <lms容器> getent hosts ncmapi`。
 
-- **下载目录**：留空会自动落到“第一个音乐库文件夹/NetEase”（例如 `/music/NetEase`，
+- **下载目录**：留空会自动落到"第一个音乐库文件夹/NetEase"（例如 `/music/NetEase`，
   对应宿主机 `/music` 映射处）。设置页会列出当前音乐库目录及其一级子目录，可直接下拉选择，
   输入框也支持 LMS 的路径自动补全；仍可手动填写任意绝对路径。
 
@@ -228,7 +185,7 @@ Docker 下还有两个配置要改：
 
 `dist/` 下已生成可直接托管的文件：
 
-- `NetEase-0.1.27.zip`：插件包，解压后顶层为 `NetEase/`；
+- `NetEase-0.1.38.zip`：插件包，解压后顶层为 `NetEase/`；
 - `repo.xml`：LMS 第三方插件库描述，已填入 zip 的 SHA1 和下载 URL。
 
 用法：
@@ -236,11 +193,11 @@ Docker 下还有两个配置要改：
 1. 把 `dist/` 放到任意 HTTP 静态服务器上（LMS 不支持 `file://`）。例如在 NAS/宿主机：
    `python -m http.server 8000`，或把目录交给 nginx。
 2. 确认 `repo.xml` 里的 `url` 是 LMS 容器能访问到的地址（示例为
-   `http://192.168.2.100:8080/NetEase-0.1.27.zip`）；若端口/IP 不同，改这一行后
+   `http://192.168.2.100:8080/NetEase-0.1.31.zip`）；若端口/IP 不同，改这一行后
    无需重新算 SHA1。
 3. LMS → 设置 → 插件 → 第三方插件库，填仓库描述文件的实际 URL，例如
    `http://192.168.2.100:8080/repo.xml`；
-4. 勾选底部的 **“使用不受支持的扩展”**，保存并刷新插件列表；
+4. 勾选底部的 **"使用不受支持的扩展"**，保存并刷新插件列表；
 5. 在列表中找到 **NetEase Cloud Music** 并安装，然后重启 LMS。
 
 更新插件时，重新打包 zip，并同步修改 `repo.xml` 中的 `version`、`sha`、`url`。
@@ -301,38 +258,39 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 
 ---
 
-## 5. 登录步骤
+## 5. 登录
 
 打开 `设置 → 插件 → NetEase Cloud Music → Settings`。
 
 ### 5.1 手机号 + 密码（仅 API 后端）
 
 1. `Backend` 保持 `NeteaseCloudMusicApi`。
-2. 填写手机号和密码，点“手机号 + 密码登录”。
+2. 填写手机号和密码，点"手机号 + 密码登录"。
 3. 登录成功后 Cookie、UID、昵称会写入插件 prefs；密码只在本次请求中使用，
    **不会保存，也不会写入日志**。
-4. 如果返回“检测到当前登录存在安全风险”等风控错误，说明网易云拒绝了服务器 IP 的
+4. 如果返回"检测到当前登录存在安全风险"等风控错误，说明网易云拒绝了服务器 IP 的
    密码登录，请改用 **5.2 扫码登录** 或 5.3 Cookie。
+5. 如果返回要求输入验证码，设置页会显示验证码图片，输入图中字符后再次点击登录即可。
 
 ### 5.2 扫码登录（仅 API 后端，推荐）
 
 1. `Backend` 保持 `NeteaseCloudMusicApi`。
-2. 点“生成二维码”，页面会显示二维码图片。
+2. 点"生成二维码"，页面会显示二维码图片。
 3. 用网易云音乐 App 扫码，并在手机上确认登录。
-4. 回到设置页点“我已扫码”：
+4. 回到设置页点"我已扫码"：
    - 已确认：Cookie、UID、昵称写入 prefs，显示登录成功；
    - 已扫码未确认：再点一次；
    - 过期：重新生成二维码。
 5. 二维码只用于本次登录，成功后插件会清除本地保存的二维码和 key。
 
-扫码登录不经过密码校验，通常不受“密码登录存在安全风险”的风控影响；但服务器 IP
+扫码登录不经过密码校验，通常不受"密码登录存在安全风险"的风控影响；但服务器 IP
 被网易云整体封禁时仍可能失败，此时请用 Cookie。
 
-如果扫码后手机提示“当前设备环境异常，本次操作已拦截”，先用新版 Enhanced 后端
+如果扫码后手机提示"当前设备环境异常，本次操作已拦截"，先用新版 Enhanced 后端
 （`moefurina/ncm-api:latest`）重试；旧版 Binaryify API（Docker 镜像里的 4.27.0）
 更容易触发该拦截。仍然失败时：
 
-1. 设置页的 **“发送给网易云的公网 IP”** 填家庭宽带公网 IP（在路由器管理页或
+1. 设置页的 **"发送给网易云的公网 IP"** 填家庭宽带公网 IP（在路由器管理页或
    `whatismyip` 类网站查看），保存后重新生成二维码再扫；
 2. 仍失败就改用 Cookie 登录——Cookie 只用于校验账号和取数据，不再经过登录风控。
 
@@ -346,18 +304,18 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
    任选一个 `music.163.com` 请求，复制完整请求头 `Cookie`（带 `name=value`）。
 3. 粘贴到设置页 `Cookie` 输入框，写成 `MUSIC_U=...`；只粘贴值也可以，多行粘贴
    时插件会把每个值依次当作 `MUSIC_U` 尝试。
-4. API 后端：点“验证 Cookie / 账号”，插件会调用 `/login/status` 自动填入 UID/昵称。
-   只有验证成功（拿到账号 UID）后，状态才显示“已登录”；验证失败会显示“未登录”，
+4. API 后端：点"验证 Cookie / 账号"，插件会调用 `/login/status` 自动填入 UID/昵称。
+   只有验证成功（拿到账号 UID）后，状态才显示"已登录"；验证失败会显示"未登录"，
    但刚粘贴的 Cookie 仍会保留，方便修正后重试。
 5. 直连后端：必须手动填写 `User ID`（网易云个人主页 URL 中的数字 ID），
-   再点“验证”。
+   再点"验证"。
 
 > Cookie 等同于账号密码，请勿截图、粘贴到公开位置或提交到仓库。
 > 插件日志不会打印 Cookie；如果怀疑泄露，请在网易云网页端退出登录使 Cookie 失效。
 
 ### 5.4 退出登录
 
-设置页点“退出登录”：清除本地 Cookie、UID、昵称；API 后端还会调用 `/logout`。
+设置页点"退出登录"：清除本地 Cookie、UID、昵称；API 后端还会调用 `/logout`。
 这不会删除你在网易云账号里的任何数据。
 
 ---
@@ -378,7 +336,7 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 `搜索歌曲` 使用 LMS 的搜索输入框，结果取 `/cloudsearch` 前 30 条。
 
 `每日推荐`、`我喜欢的音乐`、`推荐新歌`、`搜索歌曲` 在直连模式下会提示
-“该功能仅 API 后端支持”（直连模式只保留歌单浏览；红心歌曲会退化为
+"该功能仅 API 后端支持"（直连模式只保留歌单浏览；红心歌曲会退化为
 从歌单列表里定位 `specialType == 5` 的歌单）。
 
 插件会对不超过 300 首的歌单/曲目列表预解析播放地址：
@@ -387,22 +345,19 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 - 只有试听片段：标题后加 `[试听]`；
 - 无 URL：显示为文本项，并给出原因（VIP/版权/Cookie 失效等）。
 
-超过 300 首的歌单跳过预检查，所有曲目都可点击；真正播放时再由
-`ProtocolHandler` 解析，拿不到 URL 会在日志中记录原因并停止播放。
+超过 300 首的歌单跳过预检查，所有曲目都可点击；真正播放时再解析，
+拿不到 URL 会在日志中记录原因并停止播放。
 
 ### 6.2 播放链路
 
 1. 菜单项 URL 为 `netease://track/<songId>`；
-2. `Plugins::NetEase::ProtocolHandler` 注册 `netease` 协议；
-3. 播放前调用 `Plugins::NetEase::API->getSongUrl()` 获取真实音频 URL；
-4. 真实 URL 统一转成 `https://`，交给 LMS 的
-   `Slim::Player::Protocols::HTTPS::scanUrl()`；
-5. 扫描成功后把真实 URL 写入 `$song->streamUrl()`，LMS 的 HTTP/HTTPS
-   处理器负责实际流式传输、Range/seek、重定向；
-6. 播放地址缓存 5 分钟；失效后下一次播放会重新解析。
+2. 插件注册 `netease` 协议，播放前获取真实音频 URL；
+3. 真实 URL 统一转成 `https://`，交给 LMS 的 HTTPS 处理器完成流式传输、
+   Range/seek、重定向；
+4. 播放地址缓存 5 分钟；失效后下一次播放会重新解析。
 
-元数据（标题、歌手、专辑、封面、时长）在浏览时写入 LMS 缓存（24 小时），
-`getMetadataFor` 会返回这些信息。封面 URL 同样统一为 `https://`。
+元数据（标题、歌手、专辑、封面、时长）在浏览时写入 LMS 缓存（24 小时）。
+封面 URL 同样统一为 `https://`。
 
 ### 6.3 音质
 
@@ -422,15 +377,73 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 
 ### 7.1 触发方式
 
-1. **浏览菜单**：`网易云音乐 → 下载` → 选择歌单 → 页面第一项是“下载此歌单”，
+1. **浏览菜单**：`网易云音乐 → 下载` → 选择歌单 → 页面第一项是"下载此歌单"，
    其后每首曲目各占一项（`下载：歌手 - 歌名`），点哪首就只下哪首。
-2. **歌单浏览页**：进入 `我的歌单 → 某个歌单`，最后一项也是“下载此歌单”。
-3. **CLI / JSON-RPC**：
+2. **歌单浏览页**：进入 `我的歌单 → 某个歌单`，最后一项也是"下载此歌单"。
+3. **条目操作菜单（右键 / 长按 / 三点菜单）**：
+
+   | 位置 | 条目 | 菜单项 | 实际执行 |
+   | --- | --- | --- | --- |
+   | `网易云音乐 → 我的歌单` | 每个歌单 | 下载此歌单 | `netease download playlist <playlistId>` |
+   | 顶层入口 | 每日推荐 | 下载此歌单 | `netease download feed daily` |
+   | 顶层入口 | 我喜欢的音乐 | 下载此歌单 | `netease download feed liked` |
+   | 顶层入口 | 推荐新歌 | 下载此歌单 | `netease download feed new` |
+   | 歌单内曲目列表（`我的歌单 → 歌单`、每日推荐、我喜欢的音乐、推荐新歌、搜索结果） | 每首可播放曲目 | 下载这首歌 | `netease download track <songId>` |
+   | `网易云音乐 → 我的歌单` | 每个歌单 | 存为本地歌单 | `netease savetolocal playlist <playlistId>` |
+   | 顶层入口 | 每日推荐 / 我喜欢的音乐 / 推荐新歌 | 存为本地歌单 | `netease savetolocal feed <daily\|liked\|new>` |
+
+   实现方式是给条目加 LMS 原生字段 `jive => { actions => { ... } }`：
+   `Slim::Control::XMLBrowser` 会把这些动作合并进条目的 `actions` 哈希
+   （见 LMS 源码该文件约 1347–1350 行的 `$item->{jive}{actions}` 合并逻辑），
+   动作对象使用的键是 `cmd`（不是 `command`），值为完整 CLI 命令数组。
+
+   进入下载队列的路径：
+
+   - 歌单 / 单曲：`netease download playlist|track <id>` → `cliDownload` →
+     `Downloader->downloadPlaylist/downloadTrack`（原有队列）；
+   - 内置 feed（每日推荐/我喜欢的音乐/推荐新歌）：`netease download feed <daily|liked|new>`
+     → `Downloader->downloadFeed`，先按接口重新拉取该入口的曲目
+     （`getDailySongs` / `getLikedSongs`（每页 300 首）/ `getNewSongs`），
+     再交给与歌单下载共用的 `_run_tracklist` → `_process_tracks` → `_download_file`。
+     没有另写一套下载流程；"我喜欢的音乐"按 `FEED_PAGE_SIZE => 300` 分页取全量。
+   - feed 任务在队列监控页的"任务"列显示 `每日推荐` / `我喜欢的音乐` /
+     `推荐新歌`；落盘子目录为 ASCII 名 `DailyRecommendations/`、`LikedSongs/`、
+     `NewSongs/`（避免与非 ASCII 的下载根目录路径拼接时出现编码问题）。
+
+   **显示限制**（重要）：
+
+   - LMS **默认网页皮肤**（`HTML/Default/xmlbrowser.html`）对每个条目只渲染
+     `playLink / insertLink / addLink / removeLink / mixersLink` 五个槽位，
+     没有渲染任意自定义动作的模板逻辑 → 网页列表里看不到这些菜单项；
+   - **Material Skin** 的第三方动作入口 `registerCustomAction($section, $action)`
+     是 section 级的，且前端取 `playlist-track` 等 section 动作时不带 `filter`，
+     会把"下载"挂到同 section 的所有条目（包括本地音乐库曲目），违反"只在网易云
+     条目生效"的要求，因此**不采用**；插件自定义 feed 的条目通常也落不进这些 section；
+   - 能读取条目 `actions` 的客户端（如 SqueezePlay/iPeng 这类基于 jive 数据模型的
+     控制器）会按 `title` 显示这两个动作；
+   - 因此**网页界面里稳定可用的入口仍是**：`我的歌单 → 歌单` 末尾的"下载此歌单"，
+     以及 `网易云音乐 → 下载 → 歌单` 里的"下载此歌单 / 下载：歌手 - 歌名"。
+     插件自定义 feed 的条目没有本地库 `_id:` 前缀，Material Skin 的条目菜单也不会
+     为它们生成下载动作，所以没有对 favorites / 本地曲目误挂风险——动作只写在
+     本插件自己返回的条目上。
+
+   LMS 8.x 与 9.x 的差异：`jive.actions` 合并逻辑在 8.x、9.x 都存在且写法一致；
+   差别在网页模板——默认皮肤始终只认上面五个槽位，因此 8.x / 9.x 网页端都不会显示
+   这两个自定义动作。插件按 8.x 的写法（`jive => { actions => { name => { cmd => [...],
+   title => ... } } }`）实现，9.x 可原样运行。
+
+4. **CLI / JSON-RPC**：
 
    ```powershell
    # CLI（LMS 命令行接口，默认 telnet 9090）
    netease download playlist 123456
    netease download track 347230
+   netease download feed daily     # 每日推荐
+   netease download feed liked     # 我喜欢的音乐
+   netease download feed new       # 推荐新歌
+   netease savetolocal playlist 123456   # 网易云歌单 → LMS 本地 playlist
+   netease savetolocal feed daily        # 每日推荐 → LMS 本地 playlist
+   netease lyrics 347230                 # 查歌词（首次返回 queued，缓存命中后返回完整字段）
    ```
 
    ```powershell
@@ -439,13 +452,43 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
      --data '{"id":1,"method":"netease","params":["download","playlist","123456"]}'
    ```
 
+5. **歌词获取**（Material Skin "正在播放"页 tab + CLI `netease lyrics <trackId>`）：
+
+   网易云曲目的歌词、艺术家简介、专辑介绍全部通过 override MAI（MusicArtistInfo）
+   CLI 命令获取，数据链路、缓存策略、fallback 机制详见 **7.5 节**。
+
+6. **存为本地歌单机制**（`netease savetolocal`）：
+
+   CLI 命令是异步的（网易云 API 全走回调链，不能在同步请求里等结果），
+   命令返回 "save queued" 后在事件循环下一个 tick 启动。内部流程：
+
+   1. 调 `getAllPlaylistTracks` / `getDailySongs` / `getLikedSongs` / `getNewSongs`
+      拉曲目列表（"我喜欢的音乐"按 300 首一页拉全）；
+   2. 生成 `netease://track/<songId>` URL 数组；
+   3. 保存当前播放队列 → `playlist clear` →
+      `playlist addtracks listRef [url1, url2, ...]` →
+      `playlist save _title=<name> silent=1` → 恢复原队列。
+
+   为什么能接受自定义 scheme：`playlist addtracks` 的 `listRef` 分支接受 Perl
+   ARRAY ref，元素原样传给 `Slim::Player::Playlist::addTracks`，后者不做 scheme
+   校验（Material Skin 自身就用这条路径塞 `randomplay://`）。存进本地 playlist
+   后播放时，`netease://` 会走本插件的 ProtocolHandler 解析真实 URL。
+
+   本地 playlist 名统一加"网易云 - "前缀；同名已存在时自动加时间戳避免覆盖。
+   歌单条目动作只对本插件自己返回的歌单生效（`我的歌单` 列表里的每一项），
+   内置 feed 顶层入口同样有效。**单曲条目未单独做 savetolocal 动作**——单曲存为
+   本地歌单需要交互选歌单（Material Skin 的 `ADD_TO_PLAYLIST_ACTION` 内置对话框），
+   如果网易云曲目能被它识别为 `saveableTrack`，右键菜单里应该已经能看到"加入播放列表"；
+   `我的歌单` 是容器条目，Material Skin 的内置动作不会对容器节点生效，所以
+   歌单条目的 savetolocal 必须靠我们自己的条目动作。
+
    下载是异步的，命令只负责入队；进度看下载队列监控页（`设置 → 插件 → 下载队列`）
    或 LMS 日志（日志分类 `plugin.netease`）。仍保留 `netease download all` 作为
-   CLI 的批量入口，但浏览菜单里不再提供“一键下载全部”的按钮。
+   CLI 的批量入口，但浏览菜单里不再提供"一键下载全部"的按钮。
 
 ### 7.2 下载队列监控页
 
-入口：`设置 → 插件 → 下载队列`，或插件设置页顶部的“下载队列”链接。
+入口：`设置 → 插件 → 下载队列`，或插件设置页顶部的"下载队列"链接。
 
 - **下载目录检查**：显示插件实际写入的绝对路径、**真实写入测试**结果（不是只看权限位）、
   目录属主/权限，以及 LMS 进程的运行身份（uid/euid）。"下载完全没反应"先看这里：
@@ -467,6 +510,8 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 - 留空时：使用 LMS 音乐库第一个目录下的 `NetEase` 子目录；
 - 两者都没有时：下载不可用，设置页会提示；
 - 每个歌单一个子目录：`<根目录>/<歌单名>/`；
+- 内置 feed 各一个子目录：`<根目录>/DailyRecommendations/`、
+  `<根目录>/LikedSongs/`、`<根目录>/NewSongs/`；
 - 单曲命令下载到 `<根目录>/Singles/`；
 - 文件名：`歌手 - 歌名 [songId].扩展名`；
 - 非法字符 `\ / : * ? " < > |` 替换为 `_`，控制字符删除，最长 120 字符；
@@ -479,11 +524,73 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 - 下载失败最多重试 3 次，间隔约 5 秒、10 秒；重试用的是同一个 URL，
   如果 URL 已过期会最终失败（日志会记录）。
 - 下载任务串行执行，避免一次打满带宽。
-- **只下载有完整播放权限的曲目**：`freeTrialInfo` 非空的试听片段会跳过，
-  避免保存 45 秒残片。
+- **只下载有完整播放权限的曲目**：试听片段会跳过，避免保存 45 秒残片。
 - 下载音质由 `Download quality` 决定，和播放一样受账号 VIP/版权/地区限制；
   无损通常需要 VIP，普通账号可能只能拿到标准/较高音质。
 - 下载完成后不会自动加入 LMS 音乐库；需要把目录加入音乐库并触发扫描。
+
+### 7.5 "正在播放"页歌词 / 艺术家简介 / 专辑介绍（Material Skin 等）
+
+LMS 生态里没有统一的"第三方歌词/简介"API——Material Skin、SqueezePlay、iPeng
+等客户端的"正在播放"页信息 tab 都是 **硬编码调 MAI（MusicArtistInfo）插件**
+的 CLI 命令（`musicartistinfo lyrics` / `biography` / `albumreview`），
+而不是走 LMS 的 TrackInfo infoProvider 系统。MAI 对网易云曲目的维基百科请求
+不仅超时率高（维基对中文搜索不稳定），内容也不是网易云官方简介。
+
+因此本插件在 `initPlugin` 里通过 `Slim::Control::Request::addDispatch` **override
+了 MAI 的 7 个 CLI 命令**：
+
+| MAI CLI 命令 | 网易云曲目行为 | 非网易云曲目行为 |
+| --- | --- | --- |
+| `lyrics` | 调自建后端 `/lyric?id=<songId>`，LRC + 翻译 | fallback MAI 原始 handler |
+| `biography` | 调 `/artists?id=<artist_id>` 取 `briefDesc`；支持多艺人，每个查后拼接 | fallback MAI 原始 handler |
+| `albumreview` | 调 `/album?id=<album_id>` 取 `description` | fallback MAI 原始 handler |
+| `workreview` | 返回空（网易云无对应 API） | fallback MAI 原始 handler |
+| `artistphoto` / `artistphotos` | 返回空（网易云无对应 API，也屏蔽维基超时） | fallback MAI 原始 handler |
+| `albumcovers` | 返回空（网易云无对应 API） | fallback MAI 原始 handler |
+
+#### ID 解析顺序（biography / albumreview）
+
+Material Skin 调 biography/albumreview 时不一定传 `artist_id:` / `album_id:`，
+只传 `artist:<名字>` / `album:<名字>` 也常见。我们按以下顺序解析 ID：
+
+1. **参数直接给了** `artist_id` / `album_id` → 直接用；
+2. **从 song_id 缓存拿**：从 URL / track_id 提取网易云 song_id → 查 `netease_meta_<sid>`
+   缓存中的 `artist_ids` / `album_id`（ProtocolHandler.scanUrl 时预热）；
+3. **网易云搜索 API 兜底**：`/search?keywords=<名字>&type=100`（artist）或
+   `type=10`（album），取第一条结果的 id；多艺人时先按 `,，;&／/` 拆分再逐个搜；
+4. **彻底没线索** → fallback MAI 原始 handler（走维基）。
+
+搜索 API 用 `URI::Escape::uri_escape_utf8` 处理中文名字。
+
+#### 缓存
+
+| 缓存键 | 值 | 备注 |
+| --- | --- | --- |
+| `netease_lyric_<sid>` | LRC 原文（UTF-8 bytes） | 永久（自建后端返回稳定） |
+| `netease_meta_<sid>` | `{title, artist, album, artist_ids[], album_id, ...}` | 24h（ProtocolHandler 元数据缓存） |
+| `netease_bio_<artist_id>` | `briefDesc`（UTF-8 bytes） | 永久 |
+| `netease_albdesc_<album_id>` | `description`（UTF-8 bytes） | 永久 |
+
+所有写缓存前 `Encode::encode_utf8`，读后 `decode_utf8`——LMS DbCache 底层 Storable
+对 wide character 做 binary 序列化会 panic（`Wide character in subroutine entry at
+DbCache.pm line 78`）。
+
+#### fallback 机制
+
+initPlugin 中先判断 `Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI')`
+等是否存在——MAI 已加载则直接 override；若 MAI 未加载（插件顺序），则设 5 秒 timer
+重试。每个 handler 内部再调一次 `can()` 取原始 handler 引用，避免 override 顺序
+影响 fallback。
+
+#### 验证
+
+| 命令 | 预期 |
+| --- | --- |
+| `musicartistinfo lyrics html:1 url:netease://track/1396343703` | `result.lyrics` = LRC 字符串 |
+| `musicartistinfo biography html:1 artist_id:6452` | `result.biography` = 周杰伦简介 |
+| `musicartistinfo albumreview html:1 album_id:18905` | `result.albumreview` = 叶惠美专辑介绍 |
+| 以上命令对非网易云曲目（本地库 / 其他协议） | 正常返回 MAI 维基搜索结果 |
 
 ---
 
@@ -500,93 +607,82 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 
 ---
 
-## 9. 已验证 / 未验证
-
-### 已验证（本机可执行的部分）
-
-| 项目 | 方法 | 结果 |
-| --- | --- | --- |
-| `install.xml` 结构 | PowerShell `[xml]` 解析，检查 `module`/`minVersion` | 通过 |
-| Perl 语法 | 在临时目录建立 LMS 依赖 stub，`perl -c` 编译 6 个 `.pm` | 6 个文件均 `syntax OK` |
-| 纯函数逻辑 | 文件名清洗、扩展名推断、码率映射、不可播原因、歌手拼接、封面/音频 https | 14 项检查全部通过 |
-| 下载目录候选（0.1.10） | 用临时 prefs stub 指向本机目录，调用 `Downloader->listDirs` | 返回当前目录及其一级子目录，自动去重，上限 40 项 |
-| 登录验证码（0.1.11） | mock `/login/cellphone` 返回 `{code:200,img}` 等场景，调用 `loginCellphoneSync` | 成功/验证码挑战/普通错误/非法号码 5 个分支全部正确返回 |
-| 下载队列状态机（0.1.12） | 直接驱动 `Downloader` 的入队/完成/取消/崩溃路径，检查 `queueStatus`/`cancelJob`/`clearHistory` | 进度计数、状态流转（done/error/cancelled）、错误上限、快照无闭包等 28 项检查全部通过 |
-| 下载目录诊断（0.1.13） | 用可写目录、不存在的目录、父路径是普通文件、未配置目录四种情况调用 `checkDownloadDir` | 真实写入测试、自动创建、属主/权限读取、探针文件清理等 13 项通过 |
-| 个性化入口逻辑（0.1.14） | 用可替换的 `_async` mock `/recommend/songs`、`/likelist`、`/song/detail`、`/personalized/newsong`、`/cloudsearch`、`/api/user/playlist` | 曲目归一化、红心 1000 首截断、未登录/直连哨兵、直连红心定位、`specialType` 保留等 26 项通过 |
-| 音质自动降级（0.1.15） | 用 mock 的 `_async` 模拟“无损无权限、极高可用”“全等级都锁定”“首档即可用”三种返回 | 降级顺序、按批只补未拿到地址的歌曲、四级全试后保留 `vip` 原因、多批（150 首）等 18 项通过 |
-| 红心分页（0.1.20） | 用 mock 的 `getLikedSongIds`/`getLikedSongs`/`getSongUrls` 驱动 `likedFeed`/`likedPageFeed`，并单独验证 API 切片 | 1200 首拆成 4 页、250 首不分页、末页不足一页、越界 offset、省略 limit 时不截断等 24 项通过 |
-| 歌单分页（0.1.21） | 用 mock 的 `_async` 驱动 `getPlaylistTracks`/`getAllPlaylistTracks`，用 mock 的 `getUserPlaylists`/`getPlaylistTracks` 驱动 `playlistsFeed`/`playlistFeed`/`playlistPageFeed` | 2500 首拆成 3 页、整单下载逐页拉全量、第二页失败返回部分、1000 首不分页、分页 offset/limit 透传等 38 项通过 |
-| NeteaseCloudMusicApi 接口 | 本地安装 `NeteaseCloudMusicApi@4.32.0` 并启动，实测 `/song/detail`、`/song/url/v1`、`/playlist/track/all`、`/playlist/detail`、`/user/playlist`、`/login/status` | 返回结构与插件解析一致 |
-| Enhanced 版兼容性 | 本地安装 `@neteasecloudmusicapienhanced/api@4.41.1` 并启动，实测 `/login/status`、`/song/url/v1`、`/user/playlist`；并用插件 `loginStatusSync` 直接调用 | 接口路径/返回结构一致；未登录（匿名 account）正确判定为 `not logged in` |
-| 扫码登录（真实环境） | NAS 上运行 `moefurina/ncm-api:latest`（Enhanced）后，用户在插件设置页生成二维码并扫码确认 | 通过；旧版 Docker 镜像的 Binaryify 4.27.0 会提示“当前设备环境异常” |
-| 直连接口 | 实测 `/api/song/detail`、`/api/v6/playlist/detail`、`/api/user/playlist` | 可返回数据；`/api/song/enhance/player/url` 未登录返回 `code=-110`，符合预期 |
-| 音频 URL 可达性 | 取一条公开歌曲 URL，分别用 http/https HEAD | 均返回 200、`audio/mpeg`，说明 https 化可行 |
-| 设置页/模板渲染 | 仅静态编写，未在 LMS 中渲染 | 未验证 |
-
-> 说明：`perl -c` 使用的是临时 stub，不是真实 LMS 运行环境。它能发现明显的
-> 语法错误，但不能证明所有 LMS API 在 8.x/9.x 的实际签名完全一致。
-
-### 未验证（需要真实环境/凭据）
-
-| 项目 | 原因 | 如何验证 |
-| --- | --- | --- |
-| LMS 真实加载插件 | 本机未安装 LMS 实例 | 按第 4 节安装，查看“设置 → 插件”是否出现，检查 `server.log` |
-| 设置页实际渲染/保存 | 需要 LMS Web 运行时 | 打开 Settings，保存各项；确认无模板报错、prefs 生效 |
-| 手机号+密码真实登录 | 需要真实账号，可能触发验证码 | 在设置页登录，观察是否返回 Cookie/UID |
-| Cookie 登录/持久化/退出 | 需要真实 Cookie | 粘贴 Cookie 后重启 LMS，确认仍显示已登录；点退出后确认清除 |
-| 真实歌单浏览 | 需要登录后的账号 | 进入 `我的歌单`，核对名称/封面/曲目数 |
-| 搜索入口（OPML `type => 'search'`） | 菜单渲染需要真实 LMS | 点“搜索歌曲”，确认出现输入框；输入歌手/歌名后应有结果 |
-| 每日推荐/红心/新歌入口 | 需要真实账号与 API 后端 | 在菜单中逐一打开，核对曲目与在线播放 |
-| 真实在线播放 | 需要 LMS + 播放器/软件播放器 | 点击曲目，确认 `now playing` 进度、暂停、seek、切歌 |
-| 真实下载 | 需要可播放且非试听的曲目 | 触发“下载此歌单”，检查目录、命名、跳过、日志 |
-| 直连模式真实播放 | 需要有效 Cookie/UID | 切换 `direct`，验证歌单和播放；失败则回退 API 后端 |
-| `HTTP::Tiny` 兜底路径 | 本机 Perl 有 LWP，未触发兜底分支 | 临时改名/屏蔽 LWP 后，在设置页做一次登录/验证 |
-| LMS 8.x 兼容性 | 未在 8.x 实例运行 | 在 LMS 8.5 上重复安装/浏览/播放测试 |
-
-### 建议的验证步骤
-
-1. 安装 LMS 9.x（Windows），按第 4.1 节放插件并重启。
-2. 启动 API 后端，`/login/status` 自检通过。
-3. 设置页选 `NeteaseCloudMusicApi`，用手机号+密码或 Cookie 登录。
-4. 浏览 `我的歌单`，检查封面和曲目数；播放一首非 VIP 曲目，测试暂停/seek。
-5. 打开设置页，在“下载目录”下拉框里选一个目录，并在输入框里输入路径前缀，确认出现 LMS 的路径自动补全；保存后确认 prefs 生效。
-6. 浏览 `网易云音乐 → 下载 → 某个歌单`，先点一首单曲，确认只下载这一首；再点“下载此歌单”，检查文件命名、`.part`、跳过和日志。
-7. 用 CLI `netease download track <id>` 再跑一次，确认已存在文件被跳过。
-8. 如果需要测试直连模式，准备好 Cookie+UID 后切换，重复 4、5 步。
-
----
-
-## 10. 已知限制与排错
+## 9. 常见问题与排错
 
 - **插件设置页不出现**：确认目录层级是 `<Plugins>/NetEase/install.xml`，不是
   `<Plugins>/NetEase/Plugins/NetEase/...`；确认 LMS 已重启；查 `server.log`
   中是否有 `Plugins::NetEase` 的编译错误。
-- **提示未登录/UID 缺失**：API 后端请点“验证 Cookie / 账号”让插件写入 UID；
+- **提示未登录/UID 缺失**：API 后端请点"验证 Cookie / 账号"让插件写入 UID；
   直连模式必须手动填写数字 UID。
 - **歌单为空**：API 后端可能未登录或 Cookie 已失效；直连模式可能被风控。
 - **曲目显示不可播放**：看括号里的原因；VIP/版权/地区限制是网易云侧限制，
   插件无法绕过。若全部显示 `Cookie 失效/未登录`，重新登录。
 - **能浏览但播放失败**：查日志 `plugin.netease`，确认是否拿到 URL；
   部分歌曲 URL 可能要求特定 Referer 或已过期，重新播放会重新解析。
-- **下载失败/没反应**：先打开 `设置 → 插件 → 下载队列`，看“下载目录检查”：
+- **下载失败/没反应**：先打开 `设置 → 插件 → 下载队列`，看"下载目录检查"：
   路径、真实写入测试结果、目录属主/权限、LMS 进程 uid 都会显示。注意用 root
   在宿主机 `touch` 成功不代表 LMS 能写；容器内 uid 通常不是 root，还可能是只读挂载
-  或 NAS 的 root-squash。修复后任务的“信息”列会给出失败原因。
+  或 NAS 的 root-squash。修复后任务的"信息"列会给出失败原因。
+- **条目右键菜单里看不到"下载歌曲/下载歌单"**：动作已写入条目 `jive.actions`，
+  但 LMS 默认网页皮肤和 Material Skin 都不渲染插件自定义条目动作（原因见 7.1）。
+  网页界面请用 `我的歌单 → 歌单` 末尾的"下载此歌单"，或 `网易云音乐 → 下载` 子菜单；
+  支持 jive 条目动作的控制器（SqueezePlay 等）会显示这两个菜单项。
 - **封面不显示**：LMS 需要能访问 `https://p*.music.126.net`；代理/防火墙可能拦截。
 - **API 后端 3000 端口被占用**：用环境变量 `PORT` 改端口，并同步修改插件
   `API base URL`。
-- **手机号登录要求验证码**：0.1.11 起设置页会显示验证码图片，输入图中字符后再次
-  点击登录即可；仍失败时改用扫码或 Cookie 登录。
+- **手机号登录要求验证码**：设置页会显示验证码图片，输入图中字符后再次点击登录
+  即可；仍失败时改用扫码或 Cookie 登录。
 
 ---
 
-## 11. 后续建议
+## 10. 条目操作菜单：实现说明与验证清单
 
-1. 在 LMS 9.x 与 8.5 实机上做一次完整回归，重点验证 `Settings.pm` 的
-   `SUPER::handler` 保存流程和 `ProtocolHandler` 的 seek 行为。
-2. 增加扫码登录（轮询 `/login/qr/check`），减少密码/验证码依赖。
-3. 增加专辑、歌手、私人 FM；给“我喜欢的音乐”加“喜欢/取消喜欢”写操作。
-4. 下载完成后可选调用 LMS 的库扫描接口，或写入 `.m3u` 播放列表。
-5. 为下载器增加“URL 过期后重新解析”的重试路径，而不是复用旧 URL。
-6. 如果直连模式长期不可用，考虑只保留 API 后端，减少维护面。
+### 10.1 实现位置
+
+- 歌单条目：`Plugin.pm` 的 `playlistsFeed`（`我的歌单` 列表），动作名
+  `neteaseDownload`，标题 `PLUGIN_NETEASE_ACTION_DL_PLAYLIST`（"下载此歌单"），
+  命令 `['netease','download','playlist','<playlistId>']`；
+- 顶层内置入口：`Plugin.pm` 的 `handleFeed` 中 `每日推荐`、`我喜欢的音乐`、
+  `推荐新歌` 三项，通过 `_feed_download_action($client, 'daily|liked|new')`
+  挂载同一个标题，命令 `['netease','download','feed','<daily|liked|new>']`；
+- 曲目条目：`Plugin.pm` 的 `_track_items`（所有曲目列表共用的渲染函数），
+  动作名 `neteaseDownload`，标题 `PLUGIN_NETEASE_ACTION_DL_TRACK`（"下载这首歌"），
+  命令 `['netease','download','track','<songId>']`；
+- 所有命令都落到已注册的 `netease download _what _id` 分发（`Plugin.pm` 的
+  `cliDownload`）：playlist/track 走原有 `downloadPlaylist/downloadTrack`；
+  feed 走 `Downloader->downloadFeed`，它只负责按接口重新取曲目，之后仍调用
+  与歌单下载共用的 `_run_tracklist/_process_tracks/_download_file`。
+  **没有新增独立的下载实现**。
+- 动作只存在于本插件返回的条目上；`favorites`、本地音乐库等其他菜单不经过这些
+  feed，因此不会被挂上"下载"动作。
+- 不含"下载"动作的顶层入口：`搜索歌曲`（关键词是动态请求参数，无法稳定编码进
+  动作命令）、`我的歌单` 容器与 `下载` 入口本身（前者的叶子歌单已各自带动作，
+  后者本身就是下载页面）。
+
+### 10.2 已完成的静态验证
+
+| 检查项 | 方式 | 结果 |
+| --- | --- | --- |
+| Perl 语法 | `perl -c`（API/Downloader/Downloads/ProtocolHandler/Settings/Plugin） | 全部 syntax OK |
+| 文案 token | 代码中引用的 `PLUGIN_NETEASE_*` 与 `strings.txt` 定义比对 | 无缺失（`PLUGIN_NETEASE_ACTION_DL_TRACK` / `_DL_PLAYLIST` 均已定义 EN/ZH_CN） |
+| 模板标签配对 | `basic.html`、`downloads.html` 的 `[%` / `%]` 计数 | 111/111、93/93 |
+| 下载器逻辑 | 歌单与 feed 都走 `_run_tracklist` → `_process_tracks` → `_download_file` | 共用同一套写盘/跳过/重试逻辑 |
+
+### 10.3 真实 LMS 上的验证步骤（**未验证**）
+
+> 以下步骤尚未在真实 LMS 服务器上执行，结果待验证。
+
+1. 升级插件（`install.xml` 版本 0.1.30）并重启 LMS；
+2. 打开 `设置 → 插件 → NetEase Cloud Music`，确认版本号为 0.1.30；
+3. 用支持 jive 条目动作的控制器（如 SqueezePlay）连接同一台 LMS：
+   - 进入 `我的应用 → 网易云音乐 → 我的歌单`，长按/右键任一歌单，应出现"下载此歌单"；
+   - 在顶层长按/右键 `每日推荐`、`我喜欢的音乐`、`推荐新歌`，应出现"下载此歌单"；
+   - 进入任一歌单/每日推荐/推荐新歌的曲目列表，长按/右键任一可播放曲目，
+     应出现"下载这首歌"；
+4. 触发后打开 `设置 → 插件 → 下载队列`，应能看到新任务入队并开始下载；
+   下载整份 `每日推荐`/`我喜欢的音乐`/`推荐新歌` 时，"任务"列应为对应中文名称，
+   文件落在 `DailyRecommendations/`、`LikedSongs/`、`NewSongs/` 子目录；
+5. 也可用 CLI 直接验证 feed 分支：`netease download feed daily|liked|new`；
+6. 对照检查：在 LMS 默认网页或 Material Skin 中长按/右键同类条目，预期**不出现**
+   这些自定义动作（框架限制，见 7.1），此时改用"下载"子菜单/歌单页末尾入口；
+7. 回归检查：在 favorites 与本地音乐库条目上操作，不应出现"下载这首歌/下载此歌单"。

@@ -889,20 +889,24 @@ sub _normalize_track {
 	$seconds = int( $ms / 1000 ) if $ms > 10000;
 
 	my @artistNames;
+	my @artistIds;
 	for my $a ( @$artists ) {
 		next unless ref($a) eq 'HASH';
 		my $name = $a->{name} || $a->{nickname} || '';
 		push @artistNames, { name => $name } if length $name;
+		push @artistIds, $a->{id} if $a->{id};
 	}
 
 	return {
-		id       => $t->{id},
-		name     => $t->{name} || '',
-		artist   => \@artistNames,
-		album    => $album->{name} || '',
-		cover    => $album->{picUrl} || '',
-		duration => $seconds,
-		fee      => $t->{fee},
+		id         => $t->{id},
+		name       => $t->{name} || '',
+		artist     => \@artistNames,
+		artist_ids => \@artistIds,
+		album      => $album->{name} || '',
+		album_id   => $album->{id},
+		cover      => $album->{picUrl} || '',
+		duration   => $seconds,
+		fee        => $t->{fee},
 	};
 }
 
@@ -1286,6 +1290,44 @@ sub getSongUrl {
 		},
 		$ecb,
 		$level,
+	);
+}
+
+# 拉网易云歌词：自建后端 /lyric?id=<songId>
+# 回调 $cb->(\%lyrics) 返回 { lrc => "LRC原文", tlyric => "翻译", klyric => "卡拉OK", nolyric => 0/1, pureMusic => 0/1 }
+sub getSongLyric {
+	my ( $class, $id, $cb, $ecb ) = @_;
+
+	$cb  ||= sub {};
+	$ecb ||= sub {};
+
+	return $ecb->('empty id') unless defined $id && length $id;
+
+	_async(
+		_url( '/lyric', { id => $id } ),
+		sub {
+			my $res = shift;
+			my $json = eval { decode_json( $res->content ) };
+
+			unless ( $json && ref($json) eq 'HASH' && $json->{code} == 200 ) {
+				return $ecb->( $@ || 'invalid lyric response' );
+			}
+
+			my $lrc = $json->{lrc} && $json->{lrc}{lyric} ? $json->{lrc}{lyric} : '';
+			my $tl  = $json->{tlyric} && $json->{tlyric}{lyric} ? $json->{tlyric}{lyric} : '';
+			my $kl  = $json->{klyric} && $json->{klyric}{lyric} ? $json->{klyric}{lyric} : '';
+
+			# nolyric / pureMusic 标记用于前端判断是否显示歌词区。
+			$cb->( {
+				lrc       => $lrc,
+				tlyric    => $tl,
+				klyric    => $kl,
+				nolyric   => $json->{nolyric}   ? 1 : 0,
+				pureMusic => $json->{pureMusic} ? 1 : 0,
+			} );
+		},
+		$ecb,
+		8,
 	);
 }
 

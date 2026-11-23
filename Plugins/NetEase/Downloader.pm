@@ -1,6 +1,7 @@
 package Plugins::NetEase::Downloader;
 
 use strict;
+use utf8;
 
 use File::Path qw(mkpath);
 use File::Spec;
@@ -22,6 +23,23 @@ use constant MAX_DIR_CHOICES => 40;
 # 监控页保留的历史任务数量与每个任务记录的错误条数。
 use constant MAX_HISTORY    => 30;
 use constant MAX_JOB_ERRORS => 8;
+
+# 内置 feed（每日推荐/我喜欢的音乐/推荐新歌）下载。
+# "我喜欢的音乐"可能有很多首，按页拉取。
+# 子目录名故意用 ASCII，避免与非 ASCII 的下载根目录拼接时的编码问题。
+use constant FEED_PAGE_SIZE => 300;
+
+my %FEED_LABELS = (
+	daily => '每日推荐',
+	liked => '我喜欢的音乐',
+	new   => '推荐新歌',
+);
+
+my %FEED_DIRS = (
+	daily => 'DailyRecommendations',
+	liked => 'LikedSongs',
+	new   => 'NewSongs',
+);
 
 my @pending;   # 排队中的任务
 my $current;   # 正在执行的任务（hashref）
@@ -103,6 +121,23 @@ sub downloadTrack {
 			$done->();
 		} );
 	} );
+}
+
+# 下载内置 feed（daily|liked|new）：这些入口没有歌单 ID，需要重新拉取曲目，
+# 拉取后交给 _run_tracklist，复用与歌单下载完全相同的解析/写盘流程。
+sub downloadFeed {
+	my ( $class, $feed ) = @_;
+
+	return 0 unless defined $feed && exists $FEED_LABELS{$feed};
+
+	my $label = $FEED_LABELS{$feed};
+
+	_enqueue( 'playlist', $label, sub {
+		my $next = shift;
+		$class->_run_feed( $feed, $next );
+	} );
+
+	return 1;
 }
 
 # 监控页用：当前任务、排队任务、历史任务的快照（不含闭包）。
@@ -436,37 +471,7 @@ sub _run_playlist {
 				return;
 			}
 
-			# 整张下载时 total 会跨歌单累加。
-			_job_update( total => ( $current ? $current->{total} : 0 ) + scalar(@$tracks) );
-
-			my @ids = map { $_->{id} } @$tracks;
-
-			Plugins::NetEase::API->getSongUrls(
-				\@ids,
-				sub {
-					my $urls = shift;
-
-					my $dir = _playlist_dir($title);
-
-					unless ($dir) {
-						$log->warn('NetEase download: no download directory configured');
-						_job_error('no download directory configured or directory not writable');
-						$done->();
-						return;
-					}
-
-					$log->info("NetEase download: playlist $playlistId -> $dir");
-
-					_process_tracks( $tracks, $urls, $dir, $done );
-				},
-				sub {
-					my $err = shift || 'unknown error';
-					$log->warn("NetEase download: failed to resolve song URLs for playlist $playlistId: $err");
-					_job_error("$title: failed to resolve song URLs: $err");
-					$done->();
-				},
-				$prefs->get('downloadQuality'),
-			);
+			$class->_run_tracklist( $title, $tracks, $done );
 		},
 		sub {
 			my $err = shift || 'unknown error';
@@ -474,6 +479,110 @@ sub _run_playlist {
 			_job_error("$title: failed to load playlist: $err");
 			$done->();
 		},
+	);
+}
+
+# 已拿到曲目列表后：解析播放地址并逐首下载，供歌单与内置 feed 共用。
+# $dirName 可选：内置 feed 用 ASCII 子目录名，歌单沿用歌单名。
+sub _run_tracklist {
+	my ( $class, $title, $tracks, $done, $dirName ) = @_;
+
+	$done ||= sub {};
+
+	require Plugins::NetEase::API;
+
+	# 整张下载时 total 会跨歌单累加。
+	_job_update( total => ( $current ? $current->{total} : 0 ) + scalar(@$tracks) );
+
+	my @ids = map { $_->{id} } @$tracks;
+
+	Plugins::NetEase::API->getSongUrls(
+		\@ids,
+		sub {
+			my $urls = shift;
+
+			my $dir = _playlist_dir( defined $dirName ? $dirName : $title );
+
+			unless ($dir) {
+				$log->warn('NetEase download: no download directory configured');
+				_job_error('no download directory configured or directory not writable');
+				$done->();
+				return;
+			}
+
+			$log->info("NetEase download: " . scalar(@$tracks) . " tracks -> $dir");
+
+			_process_tracks( $tracks, $urls, $dir, $done );
+		},
+		sub {
+			my $err = shift || 'unknown error';
+			$log->warn("NetEase download: failed to resolve song URLs for $title: $err");
+			_job_error("$title: failed to resolve song URLs: $err");
+			$done->();
+		},
+		$prefs->get('downloadQuality'),
+	);
+}
+
+# 拉取内置 feed 的曲目，再交给 _run_tracklist。
+sub _run_feed {
+	my ( $class, $feed, $done ) = @_;
+
+	$done ||= sub {};
+
+	require Plugins::NetEase::API;
+
+	my $label = $FEED_LABELS{$feed};
+
+	_job_update( current => $label );
+
+	my $on_error = sub {
+		my $err = shift || 'unknown error';
+		$log->warn("NetEase download: failed to load feed $feed: $err");
+		_job_error("$label: failed to load feed: $err");
+		$done->();
+	};
+
+	if ( $feed eq 'liked' ) {
+		my @all;
+		my $offset = 0;
+		my $step;
+		$step = sub {
+			Plugins::NetEase::API->getLikedSongs(
+				sub {
+					my ( $page, $total ) = @_;
+					$page ||= [];
+
+					push @all, @$page;
+					$offset += FEED_PAGE_SIZE;
+
+					if ( @$page && $offset < ( $total || 0 ) ) {
+						$step->();
+						return;
+					}
+
+					if (@all) {
+						$class->_run_tracklist( $label, \@all, $done, $FEED_DIRS{$feed} );
+					}
+					else {
+						_job_message("$label: feed is empty");
+						$done->();
+					}
+				},
+				$on_error,
+				$offset,
+				FEED_PAGE_SIZE,
+			);
+		};
+		$step->();
+		return;
+	}
+
+	my $method = $feed eq 'daily' ? 'getDailySongs' : 'getNewSongs';
+
+	Plugins::NetEase::API->$method(
+		sub { $class->_run_tracklist( $label, shift, $done, $FEED_DIRS{$feed} ) },
+		$on_error,
 	);
 }
 

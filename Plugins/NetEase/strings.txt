@@ -124,6 +124,27 @@ PLUGIN_NETEASE_DOWNLOAD_TRACK_ITEM
 	EN	Download: %s
 	ZH_CN	下载：%s
 
+# 条目操作菜单里的下载动作（右键/长按菜单）
+PLUGIN_NETEASE_ACTION_DL_TRACK
+	EN	Download this song
+	ZH_CN	下载这首歌
+
+PLUGIN_NETEASE_ACTION_DL_PLAYLIST
+	EN	Download this playlist
+	ZH_CN	下载此歌单
+
+PLUGIN_NETEASE_ACTION_SAVE_LOCAL
+	EN	Save as local playlist
+	ZH_CN	存为本地歌单
+
+PLUGIN_NETEASE_TRACK_LYRIC
+	EN	Lyrics
+	ZH_CN	歌词
+
+PLUGIN_NETEASE_LYRIC_LOADING
+	EN	Lyrics loading... (play this song once to prime the cache)
+	ZH_CN	歌词加载中……（先播放一次该曲目即可自动预热）
+
 PLUGIN_NETEASE_DOWNLOAD_STARTED
 	EN	Download queued. Watch progress on the plugin's "Download queue" settings page.
 	ZH_CN	已加入下载队列，进度请打开插件设置中的“下载队列”页面查看。

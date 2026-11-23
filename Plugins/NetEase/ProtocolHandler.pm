@@ -170,6 +170,11 @@ sub _attempt {
 		if ($song) {
 			$song->streamUrl( $track->url );
 			$track->url($url);
+
+			# 播放开始时异步预热歌词缓存——不阻塞播放，几秒后 CLI/metadata 就能拿到。
+			if ( my ($sid) = $url =~ m{^netease://track/(\d+)} ) {
+				eval { Plugins::NetEase::Plugin->_prime_lyric_cache($sid) };
+			}
 		}
 
 		$cb->( $track, @_ );
@@ -208,7 +213,87 @@ sub getMetadataFor {
 		$out{$key} = $meta->{$key} if defined $meta->{$key} && length $meta->{$key};
 	}
 
+	# 歌词：缓存命中时塞进 metadata，Material Skin / 其他前端可直接读。
+	if ( my $lyric = $cache->get("netease_lyric_$id") ) {
+		$out{lyric}    = $lyric->{lrc}    if $lyric->{lrc};
+		$out{lyricAlt} = $lyric->{tlyric} if $lyric->{tlyric};
+	}
+
 	return \%out;
+}
+
+# TrackInfo.pm 第 188-193 行：ProtocolHandler 可以自定义 OPML 菜单，
+# 优先于 Slim::Menu::TrackInfo 的 infoProvider 遍历。
+# Sound X UPnP 代理流模式下 TrackInfo.menu() 因找不到 Track DB 对象直接 return 空，
+# 导致所有 infoProvider（包括我们和 MAI）都不被调——但 trackInfoURL 这条链路独立，
+# 而且不需要 Track DB 对象存在。
+sub trackInfoURL {
+	my ( $class, $client, $url ) = @_;
+
+	# 原始 netease://track/ID 能直接匹配；代理流 URL 在 stream URL 里带 track id
+	my $sid;
+	if ( $url =~ m{^netease://track/(\d+)} ) {
+		$sid = $1;
+	}
+	elsif ( $url =~ m{stream.*?(\d{6,})} ) {
+		# 代理流 URL 里尝试找 6+ 位数字（网易云 song id 都是 7+ 位）
+		my @matches = $url =~ m{(\d{7,})}g;
+		$sid = $matches[0] if @matches;
+	}
+
+	return unless $sid;
+
+	# 缓存预热
+	eval { Plugins::NetEase::Plugin->_prime_lyric_cache($sid) };
+
+	# 构造歌词 tab 的 OPML 菜单，返回给 LMS。
+	# TrackInfo.pm 第 193 行：return $feed if $feed; ——只要返回非空哈希就会用这个
+	require Slim::Utils::Strings;
+	my $cstring = \&Slim::Utils::Strings::cstring;
+
+	my @items;
+
+	# 缓存命中 → 返回 LRC 原文 + 翻译（按行拆成 text 类型条目）
+	if ( my $lyric = $cache->get("netease_lyric_$sid") ) {
+		push @items, @{ _lrc_to_items( $cstring->($client, 'PLUGIN_NETEASE_TRACK_LYRIC'), $lyric->{lrc} ) };
+		if ( $lyric->{tlyric} && length $lyric->{tlyric} ) {
+			push @items, { name => '---', type => 'text' };
+			push @items, @{ _lrc_to_items( undef, $lyric->{tlyric} ) };
+		}
+	}
+	else {
+		push @items, {
+			name => $cstring->($client, 'PLUGIN_NETEASE_LYRIC_LOADING'),
+			type => 'text',
+		};
+	}
+
+	# 只返回歌词 tab 这一项（OPML item），让 Material Skin 把它嵌进 TrackInfo 菜单
+	return {
+		name  => $cstring->($client, 'PLUGIN_NETEASE_TRACK_LYRIC'),
+		type  => 'playlist',
+		items => \@items,
+	};
+}
+
+# 把 LRC 文本按行拆成 OPML text 条目。
+# 带时间轴的行原样保留（Material Skin 前端如果会解析就能用），空行跳过。
+sub _lrc_to_items {
+	my ( $header, $lrc ) = @_;
+	my @items;
+
+	if ( defined $header && length $header ) {
+		push @items, { name => $header, type => 'text' };
+	}
+
+	return \@items unless defined $lrc && length $lrc;
+
+	for my $line ( split /\r?\n/, $lrc ) {
+		next unless length $line;
+		push @items, { name => $line, type => 'text' };
+	}
+
+	return \@items;
 }
 
 sub shouldCacheImage {

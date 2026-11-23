@@ -1,0 +1,6 @@
+# 开发过程笔记（选型记录、测试记录、待办等），不随仓库发布
+DEVELOP.md
+dist/*
+# 本地开发产物
+.screenshots/
+dist/repo.xml
