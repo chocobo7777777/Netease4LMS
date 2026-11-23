@@ -41,55 +41,81 @@ use constant PLAYLIST_PAGE_SIZE => 1000;
 # 通过 track_id 从 DB 拿到原始 file:// 路径（DB 里存的是原始 URL）
 # 返回：lrc 文本（字符串）或 undef
 sub _try_local_lrc {
-	my ($trackId, $url) = @_;
+	my ($trackId, $url, $title, $artist) = @_;
+
+	$log->info("_try_local_lrc called: trackId=@{[$trackId // '(undef)']} url=@{[$url // '(undef)']}") if $log->is_info;
 
 	my $track;
-	if ($trackId && $trackId =~ /^\d+$/) {
+
+	# 方法1: track_id 查 DB（LMS DB 的自增 ID，通常 1-5 位）
+	if ($trackId && $trackId =~ /^\d+$/ && length($trackId) <= 6) {
 		$track = Slim::Schema->find('Track', $trackId);
-	}
-	elsif ($url) {
-		$track = Slim::Schema->objectForUrl($url);
+		$log->info("  Slim::Schema->find('Track', $trackId) => @{[$track ? 'found' : 'undef']}") if $log->is_info;
 	}
 
-	# 拿到 DB 里的原始 URL（本地文件应该是 file:///...）
-	my $file_url = $track ? $track->url : $url;
-	return unless $file_url;
+	# 方法2: URL 反查（本地 file:// 或 netease:// 都试试）
+	if (!$track && $url) {
+		$track = Slim::Schema->objectForUrl($url);
+		$log->info("  objectForUrl('$url') => @{[$track ? 'found' : 'undef']}") if $log->is_info;
+	}
+
+	# 拿 track 对象里的真实 URL
+	my $file_url;
+	if ($track) {
+		$file_url = $track->url;
+		$log->info("  track->url => $file_url") if $log->is_info;
+	}
+
+	# 还是没 track → 直接用传入的 url（如果是 file://）
+	$file_url ||= $url;
+
+	# URL 清洗
+	$file_url =~ s/^tmp:/file:/ if $file_url;
+
+	if (!$file_url) {
+		$log->info("  bail: no file_url at all") if $log->is_info;
+		return;
+	}
 
 	# 只处理本地文件 URL
-	$file_url =~ s/^tmp:/file:/;
-	return unless Slim::Music::Info::isFileURL($file_url);
+	if (!Slim::Music::Info::isFileURL($file_url)) {
+		$log->info("  bail: isFileURL('$file_url') = false") if $log->is_info;
+		return;
+	}
 
 	my $filePath = Slim::Utils::Misc::pathFromFileURL($file_url);
-	return unless $filePath && -e $filePath;
+	$log->info("  pathFromFileURL('$file_url') => $filePath") if $log->is_info;
 
-	# 和 MAI _getLocalLyrics 一致的查找顺序：
-	# 1. 替换扩展名 → Song.lrc
-	# 2. 原路径加 .lrc → Song.mp3.lrc
-	# 3. 同样的 .txt 变体
+	if (!$filePath || !-e $filePath) {
+		$log->info("  bail: filePath does not exist") if $log->is_info;
+		return;
+	}
+
+	$log->info("  audio file exists: $filePath") if $log->is_info;
+
+	# 和 MAI _getLocalLyrics 一致的查找顺序
 	my $alt1 = $filePath;
 	$alt1 =~ s/\.\w{2,4}$/.lrc/;
 	my $alt2 = $filePath . '.lrc';
-
-	my @candidates = ($alt1, $alt2);
-
-	# 也试 .txt
 	my $txt1 = $alt1;
 	$txt1 =~ s/\.lrc$/.txt/;
 	my $txt2 = $alt2;
 	$txt2 =~ s/\.lrc$/.txt/;
-	push @candidates, $txt1, $txt2;
+	my @candidates = ($alt1, $alt2, $txt1, $txt2);
 
 	for my $f (@candidates) {
+		$log->info("  checking candidate: $f => @{[-r $f ? 'YES' : 'no']}") if $log->is_info;
 		if ($f && -r $f) {
 			my $lyrics = eval { File::Slurp::read_file($f) };
 			if ($lyrics && length($lyrics)) {
 				utf8::decode($lyrics) unless utf8::is_utf8($lyrics);
-				$log->info("Found local lyrics: $f") if $log->is_info;
+				$log->info("  >>> FOUND local lyrics: $f") if $log->is_info;
 				return $lyrics;
 			}
 		}
 	}
 
+	$log->info("  bail: no .lrc/.txt candidates found") if $log->is_info;
 	return;
 }
 
@@ -161,15 +187,20 @@ sub initPlugin {
 	my $netease_lyrics_wrapper = sub {
 		my $request = shift;
 
-		# 从 request 里拿 url / track_id 参数
-		my $url     = $request->getParam('url')     || '';
+		# 从 request 里拿 url / track_id / title / artist 参数
+		my $url     = $request->getParam('url')      || '';
 		my $trackId = $request->getParam('track_id') || '';
+		my $title   = $request->getParam('title')    || '';
+		my $artist  = $request->getParam('artist')   || '';
+
+		# 参数 dump（调试用，每次 CLI 调用都打出来）
+		$log->info("lyrics CLI request: track_id=[$trackId] url=[$url] title=[$title] artist=[$artist]") if $log->is_info;
 
 		# === 1. 优先尝试本地 .lrc 文件 ===
 		# 绕开 Material Skin 传过来的 proxy http:// URL，
 		# 用 track_id 从 DB 拿原始 file:// 路径再找 .lrc。
 		# 本地 .lrc 优先：用户自己放的通常是精选/编辑过的。
-		if (my $local_lrc = _try_local_lrc($trackId, $url)) {
+		if (my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist)) {
 			$request->setStatusProcessing();
 
 			# 和网易云后端歌词一样处理时间戳：
