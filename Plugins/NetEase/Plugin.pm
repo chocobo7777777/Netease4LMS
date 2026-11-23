@@ -207,6 +207,9 @@ sub initPlugin {
 		[0, 0, 1, \&cliLyrics],
 	);
 
+	# 设置 overrideMAI 默认值（prefs 未存过时默认为 1 = 完全接管）
+	$prefs->set(overrideMAI => 1) unless defined $prefs->get('overrideMAI');
+
 	# === Override MAI lyrics CLI for NetEase tracks ===
 	# LMS addDispatch 文档明确说：后注册的会替换已存在的，并返回被替换的原函数 ref。
 	# 但前提是我们的 initPlugin 必须在 MAI TrackInfo->init() 之后执行。
@@ -500,8 +503,8 @@ sub initPlugin {
 	# 从网易云搜索 API 兜底找 artist_id（单个）
 	my $search_track_id = sub {
 		my ($title, $artist) = @_;
-		return unless $title;
-		my $kw = $artist ? "$artist $title" : $title;
+		return unless ($title || $artist);
+		my $kw = $artist && $title ? "$artist $title" : ($title || $artist);
 		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($kw) . "&type=1&limit=3");
 		if ( $json && $json->{result} && $json->{result}{songs} && @{ $json->{result}{songs} || [] } ) {
 			# 挑艺人名匹配的

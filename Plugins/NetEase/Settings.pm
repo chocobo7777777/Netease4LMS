@@ -18,6 +18,8 @@ sub page {
 }
 
 sub prefs {
+	# 给 overrideMAI 设默认值 1（默认开启完全接管）
+	$prefs->set(overrideMAI => 1) unless defined $prefs->get('overrideMAI');
 	return ($prefs, qw(
 		backend apiBase realIP cookie uid quality downloadDir downloadQuality
 		likedPageSize precheckLimit overrideMAI
