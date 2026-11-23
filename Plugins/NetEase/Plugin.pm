@@ -173,6 +173,7 @@ sub initPlugin {
 		downloadQuality => 'standard',
 		likedPageSize   => 300,
 		precheckLimit   => 300,
+		overrideMAI     => 1,
 	});
 
 	require Plugins::NetEase::API;
@@ -265,12 +266,17 @@ sub initPlugin {
 			$sid = $1;
 		}
 
-		# 不是网易云 → 动态转给 MAI 原始 handler（如果存在）
+		# 不是网易云 → 看 overrideMAI 设置
 		if ( !$sid ) {
+			if ( $prefs->get('overrideMAI') ) {
+				# 完全接管：非网易云也不走 MAI
+				$request->setStatusDone();
+				return;
+			}
+			# 动态转给 MAI 原始 handler
 			if ( Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI') ) {
 				return Plugins::MusicArtistInfo::TrackInfo::getSongLyricsCLI($request);
 			}
-			# MAI 没加载
 			$request->setStatusBadDispatch();
 			return;
 		}
@@ -583,6 +589,10 @@ sub initPlugin {
 		}
 
 		if ( !@artistIds ) {
+			if ( $prefs->get('overrideMAI') ) {
+				$request->setStatusDone();
+				return;
+			}
 			my $orig = Plugins::MusicArtistInfo::ArtistInfo->can('getBiographyCLI');
 			if ($orig) { return $orig->($request); }
 			$request->setStatusDone();
@@ -617,6 +627,10 @@ sub initPlugin {
 			return;
 		}
 
+		if ( $prefs->get('overrideMAI') ) {
+			$request->setStatusDone();
+			return;
+		}
 		my $orig = Plugins::MusicArtistInfo::ArtistInfo->can('getBiographyCLI');
 		if ($orig) { return $orig->($request); }
 		$request->setStatusDone();
@@ -648,6 +662,10 @@ sub initPlugin {
 		}
 
 		if ( !$albumId ) {
+			if ( $prefs->get('overrideMAI') ) {
+				$request->setStatusDone();
+				return;
+			}
 			my $orig = Plugins::MusicArtistInfo::AlbumInfo->can('getAlbumReviewCLI');
 			if ($orig) { return $orig->($request); }
 			$request->setStatusDone();
@@ -673,6 +691,10 @@ sub initPlugin {
 			return;
 		}
 
+		if ( $prefs->get('overrideMAI') ) {
+			$request->setStatusDone();
+			return;
+		}
 		my $orig = Plugins::MusicArtistInfo::AlbumInfo->can('getAlbumReviewCLI');
 		if ($orig) { return $orig->($request); }
 		$request->setStatusDone();

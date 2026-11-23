@@ -20,6 +20,7 @@ sub page {
 sub prefs {
 	return ($prefs, qw(
 		backend apiBase realIP cookie uid quality downloadDir downloadQuality
+		likedPageSize precheckLimit overrideMAI
 	));
 }
 
@@ -27,6 +28,11 @@ sub handler {
 	my ( $class, $client, $params ) = @_;
 
 	require Plugins::NetEase::API;
+
+	# Checkbox 兜底：未勾选时浏览器不传该 key，显式设 0
+	if ( !defined $params->{pref_overrideMAI} ) {
+		$params->{pref_overrideMAI} = 0;
+	}
 
 	my $oldCookie = Plugins::NetEase::API->normalizeCookie(
 		$prefs->get('cookie') || ''

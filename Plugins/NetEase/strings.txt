@@ -560,3 +560,11 @@ PLUGIN_NETEASE_DLQ_STATUS_ERROR
 PLUGIN_NETEASE_DLQ_STATUS_CANCELLED
 	EN	Cancelled
 	ZH_CN	已取消
+
+PLUGIN_NETEASE_OVERRIDE_MAI
+	EN	Override MusicArtistInfo for all tracks
+	ZH_CN	全面接管 MusicArtistInfo（所有曲目）
+
+PLUGIN_NETEASE_OVERRIDE_MAI_DESC
+	EN	When enabled, lyrics/biography/albumreview for ALL tracks (including local) are served by this plugin via NetEase backend. Lyrics still prefer local .lrc files when present. When disabled, non-NetEase tracks fall back to MusicArtistInfo (Wikipedia/Genius).
+	ZH_CN	开启后，所有曲目（包括本地）的歌词/艺人简介/专辑介绍都由本插件通过网易云后端提供。歌词仍优先使用本地 .lrc 文件。关闭时，非网易云曲目回退到 MusicArtistInfo（维基百科/Genius）。
