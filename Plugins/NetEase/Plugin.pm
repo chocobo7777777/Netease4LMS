@@ -113,6 +113,46 @@ sub _try_local_lrc {
 	return;
 }
 
+# Material Skin 的 formatLyrics() 只认 [mm:ss.xx] 格式。
+# 网易云后端 lrc.lyric 和本地某些 .lrc 文件用的是 {"t":毫秒,"c":[{tx":"文本"}]} 格式。
+# 逐行转换：JSON 行 → 标准 LRC；其他行原样保留。
+sub _convert_netease_lrc {
+	my ($text) = @_;
+	return $text unless $text && length($text) > 0;
+
+	# 快速检测：有没有网易云 JSON 行
+	return $text unless $text =~ /\{"t":\d+/;
+
+	require JSON::XS;
+
+	my @out;
+	for my $line (split /\r?\n/, $text) {
+		if ($line =~ /^\{"t":(\d+)/) {
+			my $ms = $1;
+			my $parsed = eval { JSON::XS::decode_json($line) };
+			if ($parsed && ref($parsed) eq 'HASH') {
+				my @texts;
+				if ($parsed->{c} && ref($parsed->{c}) eq 'ARRAY') {
+					for my $seg (@{ $parsed->{c} }) {
+						push @texts, $seg->{tx} if ref($seg) eq 'HASH' && defined $seg->{tx} && length($seg->{tx}) > 0;
+					}
+				}
+				if (@texts) {
+					my $joined = join('', @texts);
+					my $sec = int($ms / 1000);
+					my $mm  = int($sec / 60);
+					my $ss  = $sec % 60;
+					my $xx  = sprintf('%02d', int(($ms % 1000) / 10));
+					push @out, sprintf('[%.2d:%.2d.%s]%s', $mm, $ss, $xx, $joined);
+					next;
+				}
+			}
+		}
+		push @out, $line;
+	}
+	return join("\n", @out);
+}
+
 sub initPlugin {
 	my $class = shift;
 
@@ -188,6 +228,9 @@ sub initPlugin {
 
 		if ($local_lrc && length($local_lrc)) {
 			$request->setStatusProcessing();
+
+			# 本地文件可能是网易云 JSON 格式 → 转成标准 LRC
+			$local_lrc = _convert_netease_lrc($local_lrc);
 
 			my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
 			my $radio_url = $url;
@@ -274,8 +317,8 @@ sub initPlugin {
 			return;
 		}
 
-		# 后端返回什么格式就给什么格式（LRC 或网易云 JSON 都由 Material Skin 解析）
-		my $lrc_text = $lyric->{lrc} || '';
+		# 后端返回什么格式都可能有（标准 LRC 或网易云 JSON）→ 统一转 LRC
+		my $lrc_text = _convert_netease_lrc($lyric->{lrc} || '');
 
 		# 如果请求没要 timestamps（或有 url 参数说明是电台流），去时间戳只留纯文本
 		my $want_ts   = $request->getParam('timestamps') ? 1 : 0;

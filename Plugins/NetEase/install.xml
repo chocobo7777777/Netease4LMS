@@ -3,7 +3,7 @@
 	<id>3f1c6a4e-9d7b-4b2e-8a61-2c5d9e7f0b43</id>
 	<name>PLUGIN_NETEASE</name>
 	<module>Plugins::NetEase::Plugin</module>
-	<version>0.1.50</version>
+	<version>0.1.51</version>
 	<icon>plugins/NetEase/html/images/icon_v5.png</icon>
 	<description>PLUGIN_NETEASE_DESC</description>
 	<creator>Netease4LMS</creator>
