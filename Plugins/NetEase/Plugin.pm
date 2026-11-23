@@ -124,12 +124,16 @@ sub _convert_netease_lrc {
 	return $text unless $text =~ /\{"t":\d+/;
 
 	require JSON::XS;
+	require Encode;
 
 	my @out;
 	for my $line (split /\r?\n/, $text) {
 		if ($line =~ /^\{"t":(\d+)/) {
 			my $ms = $1;
-			my $parsed = eval { JSON::XS::decode_json($line) };
+			chomp $line;
+			# JSON::XS::decode_json 需要 UTF-8 bytes，不能是 wide chars
+			my $bytes = Encode::encode_utf8($line);
+			my $parsed = eval { JSON::XS::decode_json($bytes) };
 			if ($parsed && ref($parsed) eq 'HASH') {
 				my @texts;
 				if ($parsed->{c} && ref($parsed->{c}) eq 'ARRAY') {
