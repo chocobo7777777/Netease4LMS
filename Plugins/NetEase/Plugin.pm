@@ -102,6 +102,14 @@ sub _try_local_lrc {
 			my $lyrics = eval { File::Slurp::read_file($f) };
 			if ($lyrics && length($lyrics)) {
 				utf8::decode($lyrics) unless utf8::is_utf8($lyrics);
+
+				# 校验：本地文件可能也是垃圾（如之前用我们插件下载时缓存了坏 JSON）
+				# 跳过不包含 [mm:ss.xx] 时间戳的文件，继续试下一个候选
+				if (!_is_valid_lrc($lyrics)) {
+					$log->debug("  skip $f: not valid LRC (no timestamps)") if $log->is_debug;
+					next;
+				}
+
 				$log->info("Found local lyrics: $f") if $log->is_info;
 				return $lyrics;
 			}
