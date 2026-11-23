@@ -36,6 +36,63 @@ use constant LIKED_PAGE_SIZE => 300;
 # 超过这个数量时同样拆成多个可整页播放的入口。
 use constant PLAYLIST_PAGE_SIZE => 1000;
 
+# 尝试从本地文件系统读取 .lrc 歌词
+# 绕开 Material Skin 传过来的 proxy http:// URL，
+# 通过 track_id 从 DB 拿到原始 file:// 路径（DB 里存的是原始 URL）
+# 返回：lrc 文本（字符串）或 undef
+sub _try_local_lrc {
+	my ($trackId, $url) = @_;
+
+	my $track;
+	if ($trackId && $trackId =~ /^\d+$/) {
+		$track = Slim::Schema->find('Track', $trackId);
+	}
+	elsif ($url) {
+		$track = Slim::Schema->objectForUrl($url);
+	}
+
+	# 拿到 DB 里的原始 URL（本地文件应该是 file:///...）
+	my $file_url = $track ? $track->url : $url;
+	return unless $file_url;
+
+	# 只处理本地文件 URL
+	$file_url =~ s/^tmp:/file:/;
+	return unless Slim::Music::Info::isFileURL($file_url);
+
+	my $filePath = Slim::Utils::Misc::pathFromFileURL($file_url);
+	return unless $filePath && -e $filePath;
+
+	# 和 MAI _getLocalLyrics 一致的查找顺序：
+	# 1. 替换扩展名 → Song.lrc
+	# 2. 原路径加 .lrc → Song.mp3.lrc
+	# 3. 同样的 .txt 变体
+	my $alt1 = $filePath;
+	$alt1 =~ s/\.\w{2,4}$/.lrc/;
+	my $alt2 = $filePath . '.lrc';
+
+	my @candidates = ($alt1, $alt2);
+
+	# 也试 .txt
+	my $txt1 = $alt1;
+	$txt1 =~ s/\.lrc$/.txt/;
+	my $txt2 = $alt2;
+	$txt2 =~ s/\.lrc$/.txt/;
+	push @candidates, $txt1, $txt2;
+
+	for my $f (@candidates) {
+		if ($f && -r $f) {
+			my $lyrics = eval { File::Slurp::read_file($f) };
+			if ($lyrics && length($lyrics)) {
+				utf8::decode($lyrics) unless utf8::is_utf8($lyrics);
+				$log->info("Found local lyrics: $f") if $log->is_info;
+				return $lyrics;
+			}
+		}
+	}
+
+	return;
+}
+
 sub initPlugin {
 	my $class = shift;
 
@@ -98,6 +155,29 @@ sub initPlugin {
 		my $url     = $request->getParam('url')     || '';
 		my $trackId = $request->getParam('track_id') || '';
 
+		# === 1. 优先尝试本地 .lrc 文件 ===
+		# 绕开 Material Skin 传过来的 proxy http:// URL，
+		# 用 track_id 从 DB 拿原始 file:// 路径再找 .lrc。
+		# 本地 .lrc 优先：用户自己放的通常是精选/编辑过的。
+		if (my $local_lrc = _try_local_lrc($trackId, $url)) {
+			$request->setStatusProcessing();
+
+			# 和网易云后端歌词一样处理时间戳：
+			# Material Skin 显式请求 timestamps:1 才保留 LRC 时间戳；
+			# 纯 HTTP 代理流（Radio）也去时间戳只留纯文本。
+			my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
+			my $radio_url = $url;
+			if ( !$want_ts || $radio_url =~ m{^https?://} ) {
+				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
+				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//g;
+			}
+
+			$request->addResult('lyrics', $local_lrc) if length($local_lrc);
+			$request->setStatusDone();
+			return;
+		}
+
+		# === 2. 本地没找到 → 判断是否网易云轨道 ===
 		# 网易云 song id 提取（多种格式都能抓到）
 		my $sid;
 		if ( $url =~ m{netease://track/(\d+)} ) {
