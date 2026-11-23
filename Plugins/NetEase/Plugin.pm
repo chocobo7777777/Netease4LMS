@@ -146,46 +146,47 @@ sub _convert_netease_json_to_lrc {
 
 	require JSON::XS;
 
-	my @lrc_lines;
+	my @out_lines;
 	for my $line (split /\r?\n/, $text) {
-		next unless $line =~ /\{"t":(\d+)/;
-		my $ms = $1;
+		# 只有网易云 JSON 格式才需要转换；普通 LRC / 纯文本行原样保留
+		if ($line =~ /\{"t":(\d+)/) {
+			my $ms = $1;
 
-		my $parsed = eval { JSON::XS::decode_json($line) };
-		next unless $parsed && ref($parsed) eq 'HASH';
+			my $parsed = eval { JSON::XS::decode_json($line) };
+			if ($parsed && ref($parsed) eq 'HASH') {
+				my @texts;
+				if ($parsed->{c} && ref($parsed->{c}) eq 'ARRAY') {
+					for my $seg (@{ $parsed->{c} }) {
+						push @texts, $seg->{tx} if ref($seg) eq 'HASH' && defined $seg->{tx} && length($seg->{tx}) > 0;
+					}
+				}
 
-		# 收集所有 tx 文本
-		my @texts;
-		if ($parsed->{c} && ref($parsed->{c}) eq 'ARRAY') {
-			for my $seg (@{ $parsed->{c} }) {
-				push @texts, $seg->{tx} if ref($seg) eq 'HASH' && defined $seg->{tx} && length($seg->{tx}) > 0;
+				if (@texts) {
+					my $joined;
+					if (@texts == 2 && $texts[0] =~ /[\(\)：:]/) {
+						$joined = join('', @texts);
+					}
+					else {
+						$joined = join(' ', @texts);
+					}
+
+					my $total_sec = int($ms / 1000);
+					my $ms_part = sprintf('%03d', $ms % 1000);
+					my $mm = int($total_sec / 60);
+					my $ss = $total_sec % 60;
+					my $ts = sprintf('[%.2d:%.2d.%.2d]', $mm, $ss, substr($ms_part, 0, 2));
+
+					push @out_lines, "$ts$joined";
+					next;  # 转换成功，跳过原始 JSON 行
+				}
 			}
 		}
 
-		next unless @texts;
-
-		# 合并多段文本："标题: 内容" 或 "文本1 文本2"
-		my $joined;
-		if (@texts == 2 && $texts[0] =~ /[\(\)：:]/) {
-			# "Composer:" + "田汨@..." → "Composer: 田汨@..."
-			$joined = join('', @texts);
-		}
-		else {
-			$joined = join(' ', @texts);
-		}
-
-		# 毫秒 → [mm:ss.xx]
-		my $total_sec = int($ms / 1000);
-		my $ms_part = sprintf('%03d', $ms % 1000);
-		my $mm = int($total_sec / 60);
-		my $ss = $total_sec % 60;
-		my $ts = sprintf('[%.2d:%.2d.%.2d]', $mm, $ss, substr($ms_part, 0, 2));
-
-		push @lrc_lines, "$ts$joined";
+		# 非 JSON 行，或 JSON 解析失败 → 原样保留
+		push @out_lines, $line;
 	}
 
-	return join("\n", @lrc_lines) if @lrc_lines;
-	return $text;  # 解析失败就返回原文
+	return join("\n", @out_lines);
 }
 
 # 验证歌词文本是否包含有效时间戳

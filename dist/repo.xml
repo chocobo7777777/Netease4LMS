@@ -5,7 +5,7 @@
   <title lang="ZH_CN">Netease4LMS 插件库</title>
  </details>
  <plugins>
-  <plugin name="NetEase" version="0.1.48" target="unix|mac|windows" minTarget="8.0" maxTarget="*" category="music" sha="85755aeed0db023df8586d392d40ce14a737b81c" url="http://192.168.2.100:8080/NetEase-0.1.48.zip" creator="Netease4LMS">
+  <plugin name="NetEase" version="0.1.49" target="unix|mac|windows" minTarget="8.0" maxTarget="*" category="music" sha="0d585e26a6b6aa53ebf42bc47a8561cc81e9d893" url="http://192.168.2.100:8080/NetEase-0.1.49.zip" creator="Netease4LMS">
    <title lang="EN">NetEase Cloud Music</title>
    <title lang="ZH_CN">网易云音乐</title>
    <desc lang="EN">Browse, play and download NetEase Cloud Music playlists in Lyrion Music Server.</desc>
