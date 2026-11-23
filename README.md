@@ -72,8 +72,8 @@ Netease4LMS/
 
 ## 3. 后端
 
-插件通过 HTTP 调用 [NeteaseCloudMusicApi Enhanced](https://github.com/Binaryify/NeteaseCloudMusicApi)
-完成网易云接口的加密/签名、Cookie 管理和播放地址解析。
+插件依赖 [NeteaseCloudMusicApi Enhanced](https://github.com/Binaryify/NeteaseCloudMusicApi)，
+所有网易云接口调用、Cookie 管理和播放地址解析都由它完成。换其他后端需要改代码适配。
 
 ---
 
