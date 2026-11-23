@@ -458,8 +458,11 @@ sub initPlugin {
 		if ( !$albumId ) {
 			my $albumName = $request->getParam('album') || '';
 			my $artistName = $request->getParam('artist') || '';
-			my ($first) = $split_names->($artistName);
-			$albumId = $search_album_id->($albumName, $first);
+			my @names = $split_names->($artistName);
+			for my $n (@names) {
+				$albumId = $search_album_id->($albumName, $n);
+				last if $albumId;
+			}
 		}
 
 		if ( !$albumId ) {
