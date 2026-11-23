@@ -362,8 +362,8 @@ PLUGIN_NETEASE_LIKED_PAGE_SIZE
 	ZH_CN	红心歌单每页数量
 
 PLUGIN_NETEASE_LIKED_PAGE_SIZE_DESC
-	EN	How many liked songs per page when the list exceeds one page. Default 300.
-	ZH_CN	红心歌单超过一页时，每页展示的数量。默认 300。
+	EN	How many liked songs per page when the list exceeds one page. Default 300, max 1000.
+	ZH_CN	红心歌单超过一页时，每页展示的数量。默认 300，最大 1000。
 
 PLUGIN_NETEASE_PRECHECK_LIMIT
 	EN	Pre-check track limit
