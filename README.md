@@ -70,33 +70,17 @@ Netease4LMS/
 
 ---
 
-## 3. 两种后端模式
+## 3. 后端
 
-插件支持两种对接网易云音乐的方式，在设置页 `Backend` 中切换。两种模式不会
-自动互相回退。
+插件通过 HTTP 调用 NeteaseCloudMusicApi（推荐 Enhanced 版）完成网易云接口的
+加密/签名、Cookie 管理和播放地址解析。这是唯一受支持的后端。
 
-### A. NeteaseCloudMusicApi（默认）
-
-插件通过 HTTP 调用本地运行的 NeteaseCloudMusicApi Node.js 服务（详见 4.2 节），
-由该服务完成网易云网页接口的加密/签名、Cookie 管理和播放地址解析。推荐使用社区
-维护的 Enhanced 版（接口与原版完全一致）：
-
-- 支持手机号+密码、扫码、Cookie 三种登录方式；
-- 播放地址按 `standard/higher/exhigh/lossless` 请求音质，并返回试听/VIP 等信息，
-  便于在菜单中解释"为什么不能播"；
+- 支持扫码登录（推荐）；
+- 播放地址按 `standard/higher/exhigh/lossless` 请求音质；
 - 歌单曲目分页拉取，不受单次 1000 首截断影响。
 
-### B. 直连网页接口（实验性）
-
-不依赖 Node.js，直接用 Cookie 请求 `music.163.com` 的旧版 `/api/...` 接口：
-
-- 仅支持**手动粘贴 Cookie**，且必须手动填写 UID（网易云个人主页 URL 中的数字 ID）；
-- 仅保留歌单浏览和播放；`每日推荐`、`我喜欢的音乐`、`推荐新歌`、`搜索歌曲`
-  仅 API 后端可用；
-- 旧接口的可用性和音质上限不如 API 后端稳定。
-
-> 提示：Enhanced 版 API 默认开启"全局解灰"（`ENABLE_GENERAL_UNBLOCK`），会用第三方
-> 音源为 VIP/试听/无地址歌曲补播放地址。想只使用网易云官方音源，启动 API 时设
+> Enhanced 版默认开启"全局解灰"（`ENABLE_GENERAL_UNBLOCK=true`），会用第三方
+> 音源为 VIP/试听/无地址歌曲补播放地址。想只使用网易云官方音源，启动时设
 > `ENABLE_GENERAL_UNBLOCK=false`。
 
 ---
@@ -193,59 +177,42 @@ Docker 下还有两个配置要改：
 
 更新插件时，重新打包 zip，并同步修改 `repo.xml` 中的 `version`、`sha`、`url`。
 
-### 4.2 启动 NeteaseCloudMusicApi（使用默认后端时必需）
+### 4.2 启动 NeteaseCloudMusicApi（必需）
 
-推荐用 Enhanced 维护版；原版 `NeteaseCloudMusicApi` 也仍然兼容，任选其一。
+推荐 Enhanced 维护版，两种方式任选：
 
-方式一（Enhanced，推荐，要求 Node.js 22+）：
+**Docker（推荐）**：
+
+```yaml
+services:
+  ncmapi:
+    image: moefurina/ncm-api:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      ENABLE_GENERAL_UNBLOCK: "false"  # 只使用网易云官方音源
+```
+
+**本机 Node.js（Node.js 22+）**：
 
 ```powershell
 npm install -g @neteasecloudmusicapienhanced/api
 api
 ```
 
-方式二（原版，Node.js 14+）：
-
-```powershell
-npm install -g NeteaseCloudMusicApi@4.32.0
-NeteaseCloudMusicApi
-```
-
-方式三（源码/本地安装）：
-
-```powershell
-npm install @neteasecloudmusicapienhanced/api
-node .\node_modules\@neteasecloudmusicapienhanced\api\app.js
-```
-
-默认监听 `http://127.0.0.1:3000`，可用环境变量 `PORT` 改端口。验证：
+默认监听 `http://127.0.0.1:3000`。验证：
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 ```
 
-返回 JSON（未登录时 `data.profile` 为 `null`）即表示服务正常。
-
-然后在插件设置页把 `API base URL` 设为 `http://127.0.0.1:3000`（末尾不要加 `/`）。
-
-> 如果 LMS 与 API 服务不在同一台机器，请把地址改成实际地址，并确保网络可达。
-> 不建议把无鉴权的 API 服务直接暴露到公网。
+返回 JSON 即正常。插件设置页把 `API base URL` 设为该地址（末尾不要加 `/`）。
 
 ### 4.3 Perl 模块依赖
 
-插件只使用 LMS 自带或 Perl 核心模块：
-
-| 模块 | 用途 | 说明 |
-| --- | --- | --- |
-| `JSON::XS` | 解析接口 JSON | LMS 自带 |
-| `URI::Escape` | URL 参数编码 | Perl 核心 |
-| `Slim::Networking::SimpleAsyncHTTP` | 异步请求/下载 | LMS 自带 |
-| `LWP::UserAgent` | 设置页登录/验证的同步请求 | LMS 通常自带；缺失时自动退回 `HTTP::Tiny` |
-| `HTTP::Tiny` | 同步请求兜底 | Perl 核心（>=5.14） |
-| `IO::Socket::SSL` | 访问 https（直连模式/封面） | LMS 自带 |
-
-如果 `server.log` 出现 `Can't locate ... in @INC`，说明该 LMS 构建缺少对应模块，
-请安装到 LMS 使用的 Perl 环境，或优先使用 API 后端 + 本机 HTTP 接口。
+插件只用 LMS 自带和 Perl 核心模块（JSON::XS、URI::Escape、SimpleAsyncHTTP、
+LWP::UserAgent / HTTP::Tiny），无需额外安装。
 
 ---
 
@@ -253,61 +220,24 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 
 打开 `设置 → 插件 → NetEase Cloud Music → Settings`。
 
-### 5.1 手机号 + 密码（仅 API 后端）
+### 扫码登录（推荐）
 
-1. `Backend` 保持 `NeteaseCloudMusicApi`。
-2. 填写手机号和密码，点"手机号 + 密码登录"。
-3. 登录成功后 Cookie、UID、昵称会写入插件 prefs；密码只在本次请求中使用，
-   **不会保存，也不会写入日志**。
-4. 如果返回"检测到当前登录存在安全风险"等风控错误，说明网易云拒绝了服务器 IP 的
-   密码登录，请改用 **5.2 扫码登录** 或 5.3 Cookie。
-5. 如果返回要求输入验证码，设置页会显示验证码图片，输入图中字符后再次点击登录即可。
+1. 点"生成二维码"，页面显示二维码图片。
+2. 用网易云音乐 App 扫码，手机上确认登录。
+3. 回到设置页点"我已扫码"：Cookie、UID、昵称写入 prefs。
 
-### 5.2 扫码登录（仅 API 后端，推荐）
+二维码只用于本次登录，成功后自动清除。密码登录会被网易云风控拒绝，
+Cookie 登录操作性差，均不推荐。
 
-1. `Backend` 保持 `NeteaseCloudMusicApi`。
-2. 点"生成二维码"，页面会显示二维码图片。
-3. 用网易云音乐 App 扫码，并在手机上确认登录。
-4. 回到设置页点"我已扫码"：
-   - 已确认：Cookie、UID、昵称写入 prefs，显示登录成功；
-   - 已扫码未确认：再点一次；
-   - 过期：重新生成二维码。
-5. 二维码只用于本次登录，成功后插件会清除本地保存的二维码和 key。
+如果扫码后手机提示"当前设备环境异常"：
 
-扫码登录不经过密码校验，通常不受"密码登录存在安全风险"的风控影响；但服务器 IP
-被网易云整体封禁时仍可能失败，此时请用 Cookie。
+1. 用新版 Enhanced 后端（`moefurina/ncm-api:latest`）；
+2. 设置页的 **"发送给网易云的公网 IP"** 填家庭宽带公网 IP 后重新生成。
 
-如果扫码后手机提示"当前设备环境异常，本次操作已拦截"，先用新版 Enhanced 后端
-（`moefurina/ncm-api:latest`）重试；旧版 Binaryify API（Docker 镜像里的 4.27.0）
-更容易触发该拦截。仍然失败时：
+### 退出登录
 
-1. 设置页的 **"发送给网易云的公网 IP"** 填家庭宽带公网 IP（在路由器管理页或
-   `whatismyip` 类网站查看），保存后重新生成二维码再扫；
-2. 仍失败就改用 Cookie 登录——Cookie 只用于校验账号和取数据，不再经过登录风控。
-
-公网 IP 是动态分配时，变化后需要更新这一项。
-
-### 5.3 手动粘贴 Cookie（两种后端都可用）
-
-1. 浏览器登录 `https://music.163.com`。
-2. 打开开发者工具 → Application/存储 → Cookies → `https://music.163.com`，
-   **点中 `MUSIC_U` 那一行，只复制 Value 列**。更稳妥的做法是 Network 面板里
-   任选一个 `music.163.com` 请求，复制完整请求头 `Cookie`（带 `name=value`）。
-3. 粘贴到设置页 `Cookie` 输入框，写成 `MUSIC_U=...`；只粘贴值也可以，多行粘贴
-   时插件会把每个值依次当作 `MUSIC_U` 尝试。
-4. API 后端：点"验证 Cookie / 账号"，插件会调用 `/login/status` 自动填入 UID/昵称。
-   只有验证成功（拿到账号 UID）后，状态才显示"已登录"；验证失败会显示"未登录"，
-   但刚粘贴的 Cookie 仍会保留，方便修正后重试。
-5. 直连后端：必须手动填写 `User ID`（网易云个人主页 URL 中的数字 ID），
-   再点"验证"。
-
-> Cookie 等同于账号密码，请勿截图、粘贴到公开位置或提交到仓库。
-> 插件日志不会打印 Cookie；如果怀疑泄露，请在网易云网页端退出登录使 Cookie 失效。
-
-### 5.4 退出登录
-
-设置页点"退出登录"：清除本地 Cookie、UID、昵称；API 后端还会调用 `/logout`。
-这不会删除你在网易云账号里的任何数据。
+设置页点"退出登录"：清除本地 Cookie、UID、昵称，API 后端还会调 `/logout`。
+不会删除网易云账号数据。
 
 ---
 
@@ -325,10 +255,6 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 - 曲目显示 `歌手 - 歌名`。
 
 `搜索歌曲` 使用 LMS 的搜索输入框，结果取 `/cloudsearch` 前 30 条。
-
-`每日推荐`、`我喜欢的音乐`、`推荐新歌`、`搜索歌曲` 在直连模式下会提示
-"该功能仅 API 后端支持"（直连模式只保留歌单浏览；红心歌曲会退化为
-从歌单列表里定位 `specialType == 5` 的歌单）。
 
 插件会对不超过 300 首的歌单/曲目列表预解析播放地址：
 
