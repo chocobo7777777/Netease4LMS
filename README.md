@@ -80,6 +80,8 @@ services:
   ncmapi:
     image: moefurina/ncm-api:latest
     restart: unless-stopped
+    ports:
+      - "3000:3000"
 ```
 
 ---
