@@ -38,8 +38,9 @@ use constant PLAYLIST_PAGE_SIZE => 1000;
 
 # 尝试从本地文件系统读取 .lrc 歌词
 # 绕开 Material Skin 传过来的 proxy http:// URL，
-# 通过 track_id 从 DB 拿到原始 file:// 路径（DB 里存的是原始 URL）
-# 返回：lrc 文本（字符串）或 undef
+# 通过 track_id 从 DB 拿到原始 file:// 路径
+# 找到 .lrc/.txt 就原样返回（不管是普通 LRC 还是网易云 JSON 格式
+# 都交给 Material Skin 前端 formatLyrics() 解析，它两种都支持）
 sub _try_local_lrc {
 	my ($trackId, $url, $title, $artist) = @_;
 
@@ -62,28 +63,23 @@ sub _try_local_lrc {
 	if ($track) {
 		$file_url = $track->url;
 	}
-
-	# 还是没 track → 直接用传入的 url（如果是 file://）
 	$file_url ||= $url;
-
-	# URL 清洗
 	$file_url =~ s/^tmp:/file:/ if $file_url;
 
 	if (!$file_url) {
 		$log->debug("_try_local_lrc bail: no file_url") if $log->is_debug;
-		return;  # undef = 不是本地文件，让 MAI fallback 正常处理
+		return;
 	}
 
-	# 只处理本地文件 URL
 	if (!Slim::Music::Info::isFileURL($file_url)) {
 		$log->debug("_try_local_lrc bail: not fileURL ($file_url)") if $log->is_debug;
-		return;  # undef = 不是本地文件，让 MAI fallback 正常处理
+		return;
 	}
 
 	my $filePath = Slim::Utils::Misc::pathFromFileURL($file_url);
 	if (!$filePath || !-e $filePath) {
-		$log->debug("_try_local_lrc bail: file not exists ($filePath)") if $log->is_debug;
-		return;  # undef = 音频文件都没了
+		$log->debug("_try_local_lrc bail: audio file not exists ($filePath)") if $log->is_debug;
+		return;
 	}
 
 	# 和 MAI _getLocalLyrics 一致的查找顺序
@@ -96,119 +92,25 @@ sub _try_local_lrc {
 	$txt2 =~ s/\.lrc$/.txt/;
 	my @candidates = ($alt1, $alt2, $txt1, $txt2);
 
-	# 统计：有多少候选文件存在，其中多少不合法
-	my $found_bad = 0;
-	my $found_any = 0;
-
 	for my $f (@candidates) {
 		if ($f && -r $f) {
-			$found_any++;
+			# 跳过明显不是歌词文件的（MAI 也做这个检查）
+			if (-s $f > 100_000) {
+				$log->debug("  skip $f: too big (>100KB)") if $log->is_debug;
+				next;
+			}
+
 			my $lyrics = eval { File::Slurp::read_file($f) };
 			if ($lyrics && length($lyrics)) {
 				utf8::decode($lyrics) unless utf8::is_utf8($lyrics);
-
-				if (_is_valid_lrc($lyrics)) {
-					# 网易云 JSON 格式 → 转成普通 LRC 再返回
-					$lyrics = _convert_netease_json_to_lrc($lyrics) if _has_netease_json_lrc($lyrics);
-					$log->info("Found local lyrics: $f") if $log->is_info;
-					return $lyrics;
-				}
-				else {
-					$found_bad++;
-					$log->debug("  skip $f: not valid LRC") if $log->is_debug;
-				}
+				$log->info("Found local lyrics: $f") if $log->is_info;
+				return $lyrics;
 			}
 		}
 	}
 
-	$log->debug("_try_local_lrc: found_any=$found_any found_bad=$found_bad no valid .lrc/.txt") if $log->is_debug;
+	$log->debug("_try_local_lrc: no .lrc/.txt beside $filePath") if $log->is_debug;
 	return;
-}
-
-# 检测文本是否包含网易云格式化歌词（JSON 格式，{"t":毫秒,"c":[{tx":"文本"}]}）
-# 这种格式 Material Skin 前端能解析，但 MAI 后端 strip() 不会处理
-# 我们在服务端把它转成普通 LRC 或纯文本
-sub _has_netease_json_lrc {
-	my ($text) = @_;
-	return 0 unless $text && length($text) > 0;
-	return 1 if $text =~ /\{"t":\d+.*?"c":\[/s || $text =~ /\{"t":\d+.*?"tx":/s;
-	return 0;
-}
-
-# 把网易云 JSON 格式歌词转成普通 LRC
-# 网易云格式: {"t":毫秒, "c":[{"tx":"文本1"}, {"tx":"文本2"}]}
-#    - t = 该行起始毫秒数
-#    - c[].tx = 显示文本（可能有多段，冒号分隔制作人和内容）
-# 转换: [mm:ss.xx] 所有 tx 合并（非空的用 " - " 或直接冒号拼接）
-sub _convert_netease_json_to_lrc {
-	my ($text) = @_;
-	return $text unless _has_netease_json_lrc($text);
-
-	require JSON::XS;
-
-	my @out_lines;
-	for my $line (split /\r?\n/, $text) {
-		# 只有网易云 JSON 格式才需要转换；普通 LRC / 纯文本行原样保留
-		if ($line =~ /\{"t":(\d+)/) {
-			my $ms = $1;
-
-			my $parsed = eval { JSON::XS::decode_json($line) };
-			if ($parsed && ref($parsed) eq 'HASH') {
-				my @texts;
-				if ($parsed->{c} && ref($parsed->{c}) eq 'ARRAY') {
-					for my $seg (@{ $parsed->{c} }) {
-						push @texts, $seg->{tx} if ref($seg) eq 'HASH' && defined $seg->{tx} && length($seg->{tx}) > 0;
-					}
-				}
-
-				if (@texts) {
-					my $joined;
-					if (@texts == 2 && $texts[0] =~ /[\(\)：:]/) {
-						$joined = join('', @texts);
-					}
-					else {
-						$joined = join(' ', @texts);
-					}
-
-					my $total_sec = int($ms / 1000);
-					my $ms_part = sprintf('%03d', $ms % 1000);
-					my $mm = int($total_sec / 60);
-					my $ss = $total_sec % 60;
-					my $ts = sprintf('[%.2d:%.2d.%.2d]', $mm, $ss, substr($ms_part, 0, 2));
-
-					push @out_lines, "$ts$joined";
-					next;  # 转换成功，跳过原始 JSON 行
-				}
-			}
-		}
-
-		# 非 JSON 行，或 JSON 解析失败 → 原样保留
-		push @out_lines, $line;
-	}
-
-	return join("\n", @out_lines);
-}
-
-# 验证歌词文本是否包含有效时间戳
-# 纯 JSON 格式 → 还没转换 → 暂时算有效（转换后会有时间戳）
-# 要求至少 3 行时间戳（转换后或原生）
-sub _is_valid_lrc {
-	my ($text) = @_;
-	return 0 unless $text && length($text) > 0;
-
-	# 纯网易云 JSON → 还没转换，暂时算有效
-	return 1 if _has_netease_json_lrc($text);
-
-	# 统计时间戳行
-	my @ts_lines = ($text =~ m/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/gm);
-	return 0 unless @ts_lines >= 3;
-
-	# 时间戳占比
-	my @lines = split /\r?\n/, $text;
-	return 0 unless @lines > 0;
-	return 0 unless (scalar @ts_lines / scalar @lines) > 0.3;
-
-	return 1;
 }
 
 sub initPlugin {
@@ -332,13 +234,6 @@ sub initPlugin {
 		# 先查缓存
 		my $lyric = $cache->get("netease_lyric_$sid");
 
-		# 已缓存但检测到是垃圾（如"制作人员简介"JSON 而非 LRC）→ 清掉重来
-		if ( $lyric && ref($lyric) eq 'HASH' && !_is_valid_lrc($lyric->{lrc}) ) {
-			$cache->remove("netease_lyric_$sid");
-			$lyric = undef;
-			$log->info("Cached lyric for SID $sid looks invalid (not LRC), fetching fresh") if $log->is_info;
-		}
-
 		# 缓存 miss → 同步调自建后端
 		if ( !$lyric ) {
 			require LWP::Simple;
@@ -360,32 +255,27 @@ sub initPlugin {
 						klyric => $json->{klyric}{lyric} || '',
 					};
 
-					# 验证：只有有效 LRC 才缓存（避免"制作人员简介"等垃圾）
-					if ( _is_valid_lrc($lyric->{lrc}) ) {
+					# 只要有内容就缓存（不管是 LRC 还是网易云 JSON 格式
+					# Material Skin 前端能解析两种格式）
+					if ( length($lyric->{lrc}) > 0 ) {
 						$cache->set( "netease_lyric_$sid", $lyric );
 					}
 					else {
-						$log->info("Backend returned non-LRC for SID $sid, skipping cache") if $log->is_info;
-						$lyric = undef;  # 丢弃，下面走 fallback MAI
+						$lyric = undef;
 					}
 				}
 			}
 		}
 
-		# 还是没拿到 → 返回空（和 MAI 格式一致：没 lyrics 字段或空字符串）
+		# 还是没拿到 → 返回空
 		if ( !$lyric || !$lyric->{lrc} ) {
 			$request->addResult('title', "NetEase track $sid");
-			# 不加 lyrics 字段 → Material Skin 显示空
 			$request->setStatusDone();
 			return;
 		}
 
-		# 直接塞 LRC 字符串（和 MAI 原始 handler 格式一致）
-		# Material Skin 期望 result.lyrics 是字符串 → 传给 formatLyrics() 解析
+		# 后端返回什么格式就给什么格式（LRC 或网易云 JSON 都由 Material Skin 解析）
 		my $lrc_text = $lyric->{lrc} || '';
-
-		# 网易云后端可能返回 JSON 格式的歌词 → 服务端转成普通 LRC
-		$lrc_text = _convert_netease_json_to_lrc($lrc_text) if _has_netease_json_lrc($lrc_text);
 
 		# 如果请求没要 timestamps（或有 url 参数说明是电台流），去时间戳只留纯文本
 		my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
