@@ -436,12 +436,22 @@ sub initPlugin {
 			next if $seen{$aid}++;
 			my ($name, $b) = $fetch_bio->($aid);
 			next unless $b && length($b) > 0;
-			my $entry = $name ? "**$name**\n\n$b" : $b;
-			push @bios, $entry;
+			push @bios, { name => $name, bio => $b };
 		}
 
 		if (@bios) {
-			my $combined = join "\n\n---\n\n", @bios;
+			my $combined;
+			if (@bios == 1) {
+				# 单艺人：纯简介，不加名字（Material Skin 标题栏已经有艺人名字了）
+				$combined = $bios[0]{bio};
+			} else {
+				# 多艺人：每个块带名字前缀
+				my @parts;
+				for my $e (@bios) {
+					push @parts, $e->{name} ? "**$e->{name}**\n\n$e->{bio}" : $e->{bio};
+				}
+				$combined = join "\n\n---\n\n", @parts;
+			}
 			$request->addResult('biography', $combined);
 			$request->setStatusDone();
 			return;
