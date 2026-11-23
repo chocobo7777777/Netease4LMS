@@ -72,147 +72,42 @@ Netease4LMS/
 
 ## 3. 后端
 
-插件通过 HTTP 调用 NeteaseCloudMusicApi（推荐 Enhanced 版）完成网易云接口的
-加密/签名、Cookie 管理和播放地址解析。这是唯一受支持的后端。
-
-- 支持扫码登录（推荐）；
-- 播放地址按 `standard/higher/exhigh/lossless` 请求音质；
-- 歌单曲目分页拉取，不受单次 1000 首截断影响。
-
-> Enhanced 版默认开启"全局解灰"（`ENABLE_GENERAL_UNBLOCK=true`），会用第三方
-> 音源为 VIP/试听/无地址歌曲补播放地址。想只使用网易云官方音源，启动时设
-> `ENABLE_GENERAL_UNBLOCK=false`。
+插件通过 HTTP 调用 [NeteaseCloudMusicApi Enhanced](https://github.com/Binaryify/NeteaseCloudMusicApi)
+完成网易云接口的加密/签名、Cookie 管理和播放地址解析。
 
 ---
 
 ## 4. 安装
 
-### 4.1 放置插件
-
-1. 找到 LMS 的 `Plugins` 目录。可以在 LMS 日志开头看到插件搜索路径；
-   Windows 常见位置是 LMS 安装目录下的 `server\Plugins`（旧版 Squeezebox Server
-   可能是 `C:\Program Files (x86)\Squeezebox\server\Plugins`），Lyrion 9 的
-   安装目录通常位于 `C:\Program Files\Lyrion\Music Server` 附近。
-   `C:\ProgramData\...\Cache\InstalledPlugins\Plugins` 是插件管理器缓存目录，
-   手工放进去可能被 LMS 清理，不建议作为长期位置。
-2. 把本仓库的 `Plugins\NetEase` 整个目录复制到上述 `Plugins` 目录，最终应得到：
-
-   ```text
-   <LMS Plugins>/NetEase/install.xml
-   <LMS Plugins>/NetEase/Plugin.pm
-   ...
-   ```
-
-3. 重启 LMS（Windows 服务/托盘程序均可）。
-4. 打开 LMS Web 界面：`设置 → 插件`，应能看到 **NetEase Cloud Music**，
-   状态为 enabled；如果没有，先点"刷新/重新扫描插件"，再检查 `server.log`
-   中是否有 `netease` 相关报错。
-
-#### Docker（lmscommunity/lyrionmusicserver 镜像）
-
-LMS 没有"上传插件"的 Web 界面；Docker 安装时把插件放进容器内
-`/config/cache/Plugins/NetEase/` 即可（该目录在 `/config` 持久化卷里，
-重建容器后仍保留）。两种做法任选其一：
-
-1. 复制到宿主机映射目录：找到 compose 中 `-v xxx:/config` 的宿主机路径
-   （或 `docker inspect <容器> | grep -A5 Mounts`），把本仓库的
-   `Plugins\NetEase` 复制成 `<宿主机config目录>\cache\Plugins\NetEase\`；
-2. 直接拷进运行中的容器（写入挂载卷，效果相同）：
-
-   ```powershell
-   docker cp .\Plugins\NetEase <lms容器名>:/config/cache/Plugins/
-   ```
-
-然后 `docker restart <lms容器名>`，按上面第 4 步检查插件是否出现。
-
-Docker 下还有两个配置要改：
-
-- **API 后端地址**：容器内的 `127.0.0.1` 指容器自己。推荐把 NeteaseCloudMusicApi
-  Enhanced 也跑成容器并与 LMS 同一 network，官方镜像为 `moefurina/ncm-api:latest`
-  （默认端口 `3000`），设置页把 `API base URL` 改成 `http://<服务名或IP>:3000`；
-  或让 API 监听宿主机后使用宿主机 IP。compose 参考：
-
-  ```yaml
-  services:
-    lms:
-      # image: lmscommunity/lyrionmusicserver ...
-    ncmapi:
-      image: moefurina/ncm-api:latest
-      restart: unless-stopped
-      ports:
-        # 用 NAS IP 访问时必须有这一行；LMS 与 ncmapi 已在同一 network 并直接用服务名时可省略
-        - "3000:3000"
-      environment:
-        # 关闭"全局解灰"，只使用网易云官方音源，行为与原版一致
-        # 想尽量让 VIP/试听/无地址歌曲可播，可改成 "true"（音源来自第三方）
-        ENABLE_GENERAL_UNBLOCK: "false"
-  ```
-
-  此时 `API base URL` 填 `http://ncmapi:3000`（跨网络访问则填 `http://192.168.2.151:3000`）。
-  **前提**：LMS 与 API 必须加入同一个 Docker 网络，容器内能解析该服务名；否则请直接填
-  NAS 的局域网 IP。排查命令：`docker exec <lms容器> getent hosts ncmapi`。
-
-- **下载目录**：留空会自动落到"第一个音乐库文件夹/NetEase"（例如 `/music/NetEase`，
-  对应宿主机 `/music` 映射处）。设置页会列出当前音乐库目录及其一级子目录，可直接下拉选择，
-  输入框也支持 LMS 的路径自动补全；仍可手动填写任意绝对路径。
-
-#### 通过第三方插件库安装（可选）
-
-`dist/` 下已生成可直接托管的文件：
-
-- `NetEase-0.1.38.zip`：插件包，解压后顶层为 `NetEase/`；
-- `repo.xml`：LMS 第三方插件库描述，已填入 zip 的 SHA1 和下载 URL。
-
-用法：
-
-1. 把 `dist/` 放到任意 HTTP 静态服务器上（LMS 不支持 `file://`）。例如在 NAS/宿主机：
-   `python -m http.server 8000`，或把目录交给 nginx。
-2. 确认 `repo.xml` 里的 `url` 是 LMS 容器能访问到的地址（示例为
-   `http://192.168.2.100:8080/NetEase-0.1.31.zip`）；若端口/IP 不同，改这一行后
-   无需重新算 SHA1。
-3. LMS → 设置 → 插件 → 第三方插件库，填仓库描述文件的实际 URL，例如
-   `http://192.168.2.100:8080/repo.xml`；
-4. 勾选底部的 **"使用不受支持的扩展"**，保存并刷新插件列表；
-5. 在列表中找到 **NetEase Cloud Music** 并安装，然后重启 LMS。
-
-更新插件时，重新打包 zip，并同步修改 `repo.xml` 中的 `version`、`sha`、`url`。
-
-### 4.2 启动 NeteaseCloudMusicApi（必需）
-
-推荐 Enhanced 维护版，两种方式任选：
-
-**Docker（推荐）**：
+全 Docker 部署，compose 参考：
 
 ```yaml
 services:
+  lms:
+    image: lmscommunity/lyrionmusicserver:latest
+    volumes:
+      - ./config:/config
+      - ./music:/music
+      # 插件目录：把本仓库 Plugins/NetEase 整个放进去
+      - ./plugins/NetEase:/config/cache/Plugins/NetEase
+    ports:
+      - "9000:9000"
+
   ncmapi:
     image: moefurina/ncm-api:latest
     restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      ENABLE_GENERAL_UNBLOCK: "false"  # 只使用网易云官方音源
+    # 默认端口 3000，LMS 容器内可直接用服务名 ncmapi 访问
 ```
 
-**本机 Node.js（Node.js 22+）**：
+步骤：
 
-```powershell
-npm install -g @neteasecloudmusicapienhanced/api
-api
-```
+1. 把本仓库 `Plugins/NetEase` 目录放到 compose 同级的 `plugins/NetEase/`；
+2. `docker compose up -d`；
+3. 打开 `http://<宿主机IP>:9000` → 设置 → 插件，应看到 **NetEase Cloud Music**；
+4. 设置页把 `API base URL` 填 `http://ncmapi:3000`（LMS 与 ncmapi 在同一 compose）
+   或 `http://<宿主机IP>:3000`（跨主机）。
 
-默认监听 `http://127.0.0.1:3000`。验证：
-
-```powershell
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
-```
-
-返回 JSON 即正常。插件设置页把 `API base URL` 设为该地址（末尾不要加 `/`）。
-
-### 4.3 Perl 模块依赖
-
-插件只用 LMS 自带和 Perl 核心模块（JSON::XS、URI::Escape、SimpleAsyncHTTP、
-LWP::UserAgent / HTTP::Tiny），无需额外安装。
+> 跨主机访问时 compose 里 ncmapi 需要加 `ports: ["3000:3000"]`。
 
 ---
 
