@@ -1,7 +1,7 @@
 # NetEase Cloud Music plugin for Lyrion Music Server
 
-这是一个用 Perl 编写的 Lyrion Music Server（LMS，原名 Logitech Media Server /
-Squeezebox Server）插件，用于浏览网易云音乐账号下的歌单、在线播放歌曲，并把
+这是一个VibeCoding生成的用 Perl 编写的 Lyrion Music Server（LMS，原名 Logitech Media Server /
+Squeezebox Server）插件，用于浏览网易云音乐账号下的歌单、在线播放歌曲，支持把
 歌单/单曲下载到本地。
 
 插件目录名：`NetEase`，模块命名空间：`Plugins::NetEase::*`。
@@ -72,37 +72,33 @@ Netease4LMS/
 
 ## 3. 外部依赖
 
-- **NeteaseCloudMusicApi**：后端 API 服务，容器镜像 `moefurina/ncm-api:latest`，
-  默认端口 3000。
-
----
-
-## 4. 安装
-
-全 Docker 部署，compose 参考：
+**NeteaseCloudMusicApi**：后端 API 服务，容器镜像 `moefurina/ncm-api:latest`，
+默认端口 3000。compose 片段：
 
 ```yaml
 services:
-  lms:
-    image: lmscommunity/lyrionmusicserver:latest
-    volumes:
-      - ./config:/config
-      - ./music:/music
-      - ./plugins/NetEase:/config/cache/Plugins/NetEase
-    ports:
-      - "9000:9000"
-
   ncmapi:
     image: moefurina/ncm-api:latest
     restart: unless-stopped
 ```
 
-步骤：
+---
 
-1. 把本仓库 `Plugins/NetEase` 目录放到 compose 同级的 `plugins/NetEase/`；
-2. `docker compose up -d`；
-3. 打开 LMS → 设置 → 插件，应看到 **NetEase Cloud Music**；
-4. 插件设置页把 `API base URL` 填 `http://ncmapi:3000`。
+## 4. 安装
+
+### 4.1 放置插件
+
+把仓库 `Plugins/NetEase` 整个目录放进 LMS 的插件目录（Docker 部署通常是
+`/config/cache/Plugins/NetEase/`，对应宿主机 compose volume 映射下的路径），
+重启 LMS 后设置 → 插件应看到 **NetEase Cloud Music**。
+
+### 4.2 第三方插件库（可选）
+
+`dist/` 下有可托管的 `NetEase-x.x.x.zip` 和 `repo.xml`。在任意 HTTP 静态服务
+（nginx / `python -m http.server` 等）暴露 `dist/`，然后 LMS → 设置 → 插件 →
+第三方插件库，填入 `repo.xml` 的完整 URL，勾选"使用不受支持的扩展"即可安装。
+
+> LMS 不支持 `file://`，必须是 HTTP(S)。
 
 ---
 
