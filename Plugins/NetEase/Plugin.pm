@@ -646,6 +646,7 @@ sub likedFeed {
 			my $ids   = shift;
 			my $total = scalar @$ids;
 			my $page  = $prefs->get('likedPageSize') || 300;
+			$page = 1000 if $page > 1000;
 
 			# 数量在一页以内时直接展示曲目；超过一页就拆成分页入口。
 			if ( $total <= $page ) {
