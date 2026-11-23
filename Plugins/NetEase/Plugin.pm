@@ -274,7 +274,7 @@ sub initPlugin {
 
 		# 不是网易云 → 看 overrideMAI 设置
 		if ( !$sid ) {
-			if ( $prefs->get('overrideMAI') ) {
+			if ($prefs->get('overrideMAI') // 1) {
 				# 完全接管：主动搜网易云
 				$sid = $search_track_id->($title, $artist);
 				if ( !$sid ) {
@@ -595,6 +595,7 @@ sub initPlugin {
 		my $artist  = $request->getParam('artist')   || '';
 		my $album   = $request->getParam('album')    || '';
 
+		# 从 track_id 反查 DB
 		if ( $trackId && $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
 			my $track = Slim::Schema->find('Track', $trackId);
 			if ($track) {
@@ -614,6 +615,34 @@ sub initPlugin {
 				}
 			}
 		}
+
+		# 从 artist_id 反查 DB（Material Skin 常只传这个，是 LMS DB 自增 ID）
+		if ( !$artist && (my $aid = $request->getParam('artist_id')) ) {
+			if ( $aid =~ /^\d+$/ && Slim::Schema->can('find') ) {
+				my $artistObj = Slim::Schema->find('Contributor', $aid)
+					|| Slim::Schema->find('Artist', $aid);
+				if ($artistObj) {
+					$artist = $artistObj->name if $artistObj->name;
+					$log->info("resolve_track_info: artist_id=$aid → DB name=[$artist]");
+				} else {
+					$log->info("resolve_track_info: artist_id=$aid → NOT FOUND in DB");
+				}
+			}
+		}
+
+		# 从 album_id 反查 DB
+		if ( !$album && (my $alid = $request->getParam('album_id')) ) {
+			if ( $alid =~ /^\d+$/ && Slim::Schema->can('find') ) {
+				my $albumObj = Slim::Schema->find('Album', $alid);
+				if ($albumObj) {
+					$album = $albumObj->name if $albumObj->name;
+					$log->info("resolve_track_info: album_id=$alid → DB name=[$album]");
+				} else {
+					$log->info("resolve_track_info: album_id=$alid → NOT FOUND in DB");
+				}
+			}
+		}
+		$log->info("resolve_track_info final: title=[$title] artist=[$artist] album=[$album]");
 		return { title => $title, artist => $artist, album => $album };
 	};
 
@@ -625,9 +654,12 @@ sub initPlugin {
 		my @artistIds;
 
 		# 尝试 1: 直接给了 artist_id（可能是逗号分隔多个）
+		# 注意：Material Skin 对本地曲目传的 artist_id 是 LMS DB 自增 ID（1-3 位），
+		# 不是网易云 ID（7+ 位），要过滤掉！
 		my $artistIdParam = $request->getParam('artist_id');
 		if ($artistIdParam) {
-			push @artistIds, split /[,\s]+/, $artistIdParam;
+			my @candidates = grep { $_ && /^\d{7,}$/ } split /[,\s]+/, $artistIdParam;
+			push @artistIds, @candidates;
 		}
 
 		# 尝试 2: 从 song_id 缓存拿
@@ -666,7 +698,7 @@ sub initPlugin {
 		}
 
 		if ( !@artistIds ) {
-			if ( $prefs->get('overrideMAI') ) {
+			if ($prefs->get('overrideMAI') // 1) {
 				$request->setStatusDone();
 				return;
 			}
@@ -704,7 +736,7 @@ sub initPlugin {
 			return;
 		}
 
-		if ( $prefs->get('overrideMAI') ) {
+		if ($prefs->get('overrideMAI') // 1) {
 			$request->setStatusDone();
 			return;
 		}
@@ -718,7 +750,10 @@ sub initPlugin {
 		my $request = shift;
 		$request->setStatusProcessing();
 
+		# Material Skin 对本地曲目传的 album_id 是 LMS DB 自增 ID（1-3 位），
+		# 不是网易云 ID（7+ 位），要过滤掉！
 		my $albumId = $request->getParam('album_id');
+		$albumId = undef if defined $albumId && $albumId !~ /^\d{7,}$/;
 
 		if ( !$albumId ) {
 			my $sid = $extract_song_id->($request);
@@ -751,7 +786,7 @@ sub initPlugin {
 		}
 
 		if ( !$albumId ) {
-			if ( $prefs->get('overrideMAI') ) {
+			if ($prefs->get('overrideMAI') // 1) {
 				$request->setStatusDone();
 				return;
 			}
@@ -780,7 +815,7 @@ sub initPlugin {
 			return;
 		}
 
-		if ( $prefs->get('overrideMAI') ) {
+		if ($prefs->get('overrideMAI') // 1) {
 			$request->setStatusDone();
 			return;
 		}
@@ -789,15 +824,31 @@ sub initPlugin {
 		$request->setStatusDone();
 	};
 
-	# 注册 biography / albumreview override
-	Slim::Control::Request::addDispatch(
-		['musicartistinfo', 'biography'],
-		[0, 1, 1, $netease_biography_handler],
-	);
-	Slim::Control::Request::addDispatch(
-		['musicartistinfo', 'albumreview'],
-		[0, 1, 1, $netease_albumreview_handler],
-	);
+	# 注册 biography / albumreview override（带延迟重试，和 lyrics 一样）
+	for my $pair (
+		['musicartistinfo', 'biography',   $netease_biography_handler],
+		['musicartistinfo', 'albumreview', $netease_albumreview_handler],
+	) {
+		my $replaced = Slim::Control::Request::addDispatch(
+			[$pair->[0], $pair->[1]],
+			[0, 1, 1, $pair->[2]],
+		);
+		if ( !defined($replaced) ) {
+			Slim::Utils::Timers::setTimer(
+				__PACKAGE__,
+				time() + 5,
+				sub {
+					my $again = Slim::Control::Request::addDispatch(
+						[$pair->[0], $pair->[1]],
+						[0, 1, 1, $pair->[2]],
+					);
+					$log->warn("addDispatch $pair->[1] retry: replaced=" . (defined($again) ? 'YES' : 'NO'));
+				},
+			);
+		} else {
+			$log->info("addDispatch $pair->[1]: replaced MAI handler OK");
+		}
+	}
 
 	# workreview / artistphoto / artistphotos / albumcovers：网易云请求返回空
 	for my $cmd (qw(workreview artistphoto artistphotos albumcovers)) {
