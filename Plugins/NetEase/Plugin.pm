@@ -327,19 +327,34 @@ sub initPlugin {
 
 	# 从网易云搜索 API 兜底找 artist_id（单个）
 	my $search_artist_id = sub {
-		my ($name) = @_;
+		my ($name, $trackTitle) = @_;
 		return unless $name;
-		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($name) . "&type=100&limit=1");
+		my $kw = $trackTitle ? "$name $trackTitle" : $name;
+		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($kw) . "&type=100&limit=3");
 		if ( $json && $json->{result} && $json->{result}{artists} && @{ $json->{result}{artists} || [] } ) {
+			# 挑艺人名最匹配的（包含关系即可）
+			for my $hit ( @{ $json->{result}{artists} } ) {
+				return $hit->{id} if index($hit->{name}, $name) >= 0 || index($name, $hit->{name}) >= 0;
+			}
 			return $json->{result}{artists}[0]{id};
 		}
 		return;
 	};
 	my $search_album_id = sub {
-		my ($name) = @_;
-		return unless $name;
-		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($name) . "&type=10&limit=1");
+		my ($albumName, $artistName) = @_;
+		return unless $albumName;
+		my $kw = $artistName ? "$albumName $artistName" : $albumName;
+		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($kw) . "&type=10&limit=3");
 		if ( $json && $json->{result} && $json->{result}{albums} && @{ $json->{result}{albums} || [] } ) {
+			# 挑艺人匹配的
+			if ($artistName) {
+				for my $hit ( @{ $json->{result}{albums} } ) {
+					my @hits = @{ $hit->{artists} || [] };
+					for my $a (@hits) {
+						return $hit->{id} if index($a->{name}, $artistName) >= 0 || index($artistName, $a->{name}) >= 0;
+					}
+				}
+			}
 			return $json->{result}{albums}[0]{id};
 		}
 		return;
@@ -392,7 +407,7 @@ sub initPlugin {
 			my $artistName = $request->getParam('artist') || '';
 			my @names = $split_names->($artistName);
 			for my $n (@names) {
-				my $aid = $search_artist_id->($n);
+				my $aid = $search_artist_id->($n, $request->getParam('title'));
 				push @artistIds, $aid if $aid;
 			}
 		}
@@ -442,7 +457,9 @@ sub initPlugin {
 
 		if ( !$albumId ) {
 			my $albumName = $request->getParam('album') || '';
-			$albumId = $search_album_id->($albumName);
+			my $artistName = $request->getParam('artist') || '';
+			my ($first) = $split_names->($artistName);
+			$albumId = $search_album_id->($albumName, $first);
 		}
 
 		if ( !$albumId ) {
