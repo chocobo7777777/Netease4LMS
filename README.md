@@ -70,10 +70,10 @@ Netease4LMS/
 
 ---
 
-## 3. 后端
+## 3. 外部依赖
 
-插件依赖 [NeteaseCloudMusicApi Enhanced](https://github.com/Binaryify/NeteaseCloudMusicApi)，
-所有网易云接口调用、Cookie 管理和播放地址解析都由它完成。换其他后端需要改代码适配。
+- **NeteaseCloudMusicApi**：后端 API 服务，容器镜像 `moefurina/ncm-api:latest`，
+  默认端口 3000。
 
 ---
 
@@ -88,7 +88,6 @@ services:
     volumes:
       - ./config:/config
       - ./music:/music
-      # 插件目录：把本仓库 Plugins/NetEase 整个放进去
       - ./plugins/NetEase:/config/cache/Plugins/NetEase
     ports:
       - "9000:9000"
@@ -96,18 +95,14 @@ services:
   ncmapi:
     image: moefurina/ncm-api:latest
     restart: unless-stopped
-    # 默认端口 3000，LMS 容器内可直接用服务名 ncmapi 访问
 ```
 
 步骤：
 
 1. 把本仓库 `Plugins/NetEase` 目录放到 compose 同级的 `plugins/NetEase/`；
 2. `docker compose up -d`；
-3. 打开 `http://<宿主机IP>:9000` → 设置 → 插件，应看到 **NetEase Cloud Music**；
-4. 设置页把 `API base URL` 填 `http://ncmapi:3000`（LMS 与 ncmapi 在同一 compose）
-   或 `http://<宿主机IP>:3000`（跨主机）。
-
-> 跨主机访问时 compose 里 ncmapi 需要加 `ports: ["3000:3000"]`。
+3. 打开 LMS → 设置 → 插件，应看到 **NetEase Cloud Music**；
+4. 插件设置页把 `API base URL` 填 `http://ncmapi:3000`。
 
 ---
 
