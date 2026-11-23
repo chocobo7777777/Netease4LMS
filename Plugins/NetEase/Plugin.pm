@@ -93,6 +93,16 @@ sub _try_local_lrc {
 	return;
 }
 
+# 验证一段文本是否是有效 LRC 歌词
+# 防止网易云后端返回"制作人员简介"等垃圾 JSON 被当成歌词
+# 判断标准：必须包含至少一个 [mm:ss.xx] 时间戳标记
+sub _is_valid_lrc {
+	my ($text) = @_;
+	return 0 unless $text && length($text) > 0;
+	return 1 if $text =~ /\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/;
+	return 0;
+}
+
 sub initPlugin {
 	my $class = shift;
 
@@ -210,6 +220,13 @@ sub initPlugin {
 		# 先查缓存
 		my $lyric = $cache->get("netease_lyric_$sid");
 
+		# 已缓存但检测到是垃圾（如"制作人员简介"JSON 而非 LRC）→ 清掉重来
+		if ( $lyric && ref($lyric) eq 'HASH' && !_is_valid_lrc($lyric->{lrc}) ) {
+			$cache->remove("netease_lyric_$sid");
+			$lyric = undef;
+			$log->info("Cached lyric for SID $sid looks invalid (not LRC), fetching fresh") if $log->is_info;
+		}
+
 		# 缓存 miss → 同步调自建后端
 		if ( !$lyric ) {
 			require LWP::Simple;
@@ -230,7 +247,15 @@ sub initPlugin {
 						tlyric => $json->{tlyric}{lyric} || '',
 						klyric => $json->{klyric}{lyric} || '',
 					};
-					$cache->set( "netease_lyric_$sid", $lyric );
+
+					# 验证：只有有效 LRC 才缓存（避免"制作人员简介"等垃圾）
+					if ( _is_valid_lrc($lyric->{lrc}) ) {
+						$cache->set( "netease_lyric_$sid", $lyric );
+					}
+					else {
+						$log->info("Backend returned non-LRC for SID $sid, skipping cache") if $log->is_info;
+						$lyric = undef;  # 丢弃，下面走 fallback MAI
+					}
 				}
 			}
 		}
