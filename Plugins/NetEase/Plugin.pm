@@ -360,22 +360,32 @@ sub initPlugin {
 		return;
 	};
 
-	# 拿单个艺人简介（带缓存）
+	# 拿单个艺人简介（带艺人名字，带缓存）
 	my $fetch_bio = sub {
 		my ($artistId) = @_;
 		return unless $artistId;
 		my $cache_key = "netease_bio_$artistId";
-		my $bio = $cache->get($cache_key);
-		$bio = Encode::decode_utf8($bio) if defined $bio;
+		my $cached = $cache->get($cache_key);
+		$cached = Encode::decode_utf8($cached) if defined $cached;
+		my ($name, $bio);
+		if ($cached) {
+			if ($cached =~ /^\{/) {
+				my $data = eval { from_json($cached) };
+				if ($data) { $name = $data->{name}; $bio = $data->{bio}; }
+			}
+			# 旧缓存可能只是纯 bio 字符串
+			$bio //= $cached;
+		}
 		if ( !$bio ) {
 			my $json = $fetch_backend->("/artists?id=$artistId");
 			if ( $json && $json->{artist} && $json->{artist}{briefDesc} ) {
+				$name = $json->{artist}{name} if $json->{artist}{name};
 				$bio = $json->{artist}{briefDesc};
-				my $bytes = Encode::encode_utf8($bio);
+				my $bytes = Encode::encode_utf8( to_json({name => $name || '', bio => $bio}) );
 				$cache->set( $cache_key, $bytes );
 			}
 		}
-		return $bio;
+		return ($name, $bio);
 	};
 
 	# biography handler（支持多艺人）
@@ -424,8 +434,10 @@ sub initPlugin {
 		my @bios;
 		for my $aid (@artistIds) {
 			next if $seen{$aid}++;
-			my $b = $fetch_bio->($aid);
-			push @bios, $b if $b && length($b) > 0;
+			my ($name, $b) = $fetch_bio->($aid);
+			next unless $b && length($b) > 0;
+			my $entry = $name ? "**$name**\n\n$b" : $b;
+			push @bios, $entry;
 		}
 
 		if (@bios) {
