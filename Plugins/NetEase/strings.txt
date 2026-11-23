@@ -357,6 +357,22 @@ PLUGIN_NETEASE_DIRECT_WARNING
 	EN	Direct mode is experimental: NetEase may change its web API or block the server IP at any time. If browsing or playback fails, switch back to NeteaseCloudMusicApi.
 	ZH_CN	直连模式为实验性功能：网易云可能随时更改网页接口或封禁服务器 IP。浏览或播放失败时请切回 NeteaseCloudMusicApi。
 
+PLUGIN_NETEASE_LIKED_PAGE_SIZE
+	EN	Liked songs page size
+	ZH_CN	红心歌单每页数量
+
+PLUGIN_NETEASE_LIKED_PAGE_SIZE_DESC
+	EN	How many liked songs per page when the list exceeds one page. Default 300.
+	ZH_CN	红心歌单超过一页时，每页展示的数量。默认 300。
+
+PLUGIN_NETEASE_PRECHECK_LIMIT
+	EN	Pre-check track limit
+	ZH_CN	预检查曲目上限
+
+PLUGIN_NETEASE_PRECHECK_LIMIT_DESC
+	EN	Playlists with at most this many tracks will be pre-scanned for playable URLs so [试听] / [不可播] labels show before clicking. Larger lists skip pre-check. Default 300.
+	ZH_CN	曲目数量不超过这个值的歌单会预检查播放地址，在菜单里提前标注 [试听] / [不可播]。更大的歌单跳过预检查，默认 300。
+
 PLUGIN_NETEASE_PASSWORD_NOT_SAVED
 	EN	For security, the password is not stored.
 	ZH_CN	出于安全考虑，密码不会被保存。

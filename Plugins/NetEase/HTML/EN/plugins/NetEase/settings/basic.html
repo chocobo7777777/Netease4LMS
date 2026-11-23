@@ -141,6 +141,14 @@
 		</select>
 	[% END %]
 
+	[% WRAPPER setting title="PLUGIN_NETEASE_LIKED_PAGE_SIZE" desc="PLUGIN_NETEASE_LIKED_PAGE_SIZE_DESC" %]
+		<input type="text" class="pref" size="8" name="pref_likedPageSize" value="[% prefs.pref_likedPageSize | html %]">
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_NETEASE_PRECHECK_LIMIT" desc="PLUGIN_NETEASE_PRECHECK_LIMIT_DESC" %]
+		<input type="text" class="pref" size="8" name="pref_precheckLimit" value="[% prefs.pref_precheckLimit | html %]">
+	[% END %]
+
 	[% WRAPPER setting title="" desc="" %]
 		<div class="prefDesc">[% 'PLUGIN_NETEASE_DIRECT_WARNING' | string %]</div>
 	[% END %]

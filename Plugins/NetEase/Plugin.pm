@@ -50,6 +50,8 @@ sub initPlugin {
 		quality         => 'exhigh',
 		downloadDir     => '',
 		downloadQuality => 'standard',
+		likedPageSize   => 300,
+		precheckLimit   => 300,
 	});
 
 	require Plugins::NetEase::API;
@@ -643,9 +645,10 @@ sub likedFeed {
 		sub {
 			my $ids   = shift;
 			my $total = scalar @$ids;
+			my $page  = $prefs->get('likedPageSize') || 300;
 
 			# 数量在一页以内时直接展示曲目；超过一页就拆成分页入口。
-			if ( $total <= LIKED_PAGE_SIZE ) {
+			if ( $total <= $page ) {
 				Plugins::NetEase::API->getLikedSongs(
 					sub { _tracks_feed( $client, $callback, shift ) },
 					sub { _feed_error( $client, $callback, shift ) },
@@ -656,9 +659,9 @@ sub likedFeed {
 
 			my @items;
 
-			for ( my $offset = 0; $offset < $total; $offset += LIKED_PAGE_SIZE ) {
+			for ( my $offset = 0; $offset < $total; $offset += $page ) {
 				my $from = $offset + 1;
-				my $to   = $offset + LIKED_PAGE_SIZE;
+				my $to   = $offset + $page;
 				$to = $total if $to > $total;
 
 				push @items, {
@@ -666,7 +669,7 @@ sub likedFeed {
 					type        => 'playlist',
 					url         => \&likedPageFeed,
 					image       => 'html/images/playlists.png',
-					passthrough => [ { offset => $offset, limit => LIKED_PAGE_SIZE } ],
+					passthrough => [ { offset => $offset, limit => $page } ],
 				};
 			}
 
@@ -729,7 +732,7 @@ sub _tracks_feed {
 		return;
 	}
 
-	if ( @$tracks <= MAX_PRECHECK_TRACKS ) {
+	if ( @$tracks <= ($prefs->get("precheckLimit") || 300) ) {
 		Plugins::NetEase::API->getSongUrls(
 			[ map { $_->{id} } @$tracks ],
 			sub {
@@ -947,7 +950,7 @@ sub _playlist_tracks_menu {
 	};
 
 	# 曲目数量不多时批量解析 URL，用于在菜单里明确标注不可播放的曲目。
-	if ( @$tracks <= MAX_PRECHECK_TRACKS ) {
+	if ( @$tracks <= ($prefs->get("precheckLimit") || 300) ) {
 		Plugins::NetEase::API->getSongUrls(
 			[ map { $_->{id} } @$tracks ],
 			sub { $render->( shift ) },
