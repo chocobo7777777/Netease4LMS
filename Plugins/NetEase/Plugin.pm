@@ -216,8 +216,45 @@ sub initPlugin {
 	# 如果 addDispatch 返回 undef 说明之前没人注册过——那 MAI 可能还没加载，
 	# 我们就用延迟 timer 等到 MAI 加载完再覆盖。
 
-	# 前向声明 — lyrics handler (line ~270) 会用到，实际定义在后面 (line ~492)
-	my ($search_track_id);
+	# fetch_backend / search_track_id 必须在 lyrics handler 闭包前完整定义！
+	# Perl 闭包对 my ($var) 前向声明只创建容器，值是 undef，导致闭包内调用崩溃。
+
+	# 通用 HTTP 同步请求
+	my $fetch_backend = sub {
+		my ($apiUrl) = @_;
+		require LWP::Simple;
+		require JSON::XS;
+		my $prefs   = preferences('plugin.netease');
+		my $apiBase = $prefs->get('apiBase') || 'http://127.0.0.1:3000';
+		my $fullUrl = $apiBase . $apiUrl;
+		my $content = eval { LWP::Simple::get( $fullUrl, timeout => 8 ) };
+		return unless $content;
+		my $json = eval { JSON::XS::decode_json($content) };
+		return unless $json && ref($json) eq 'HASH' && $json->{code} == 200;
+		return $json;
+	};
+
+	my $search_track_id = sub {
+		my ($title, $artist) = @_;
+		return unless ($title || $artist);
+		my $kw = $artist && $title ? "$artist $title" : ($title || $artist);
+		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($kw) . "&type=1&limit=3");
+		if ( $json && $json->{result} && $json->{result}{songs} && @{ $json->{result}{songs} || [] } ) {
+			if ($artist) {
+				for my $hit ( @{ $json->{result}{songs} } ) {
+					my @hits = @{ $hit->{artists} || [] };
+					for my $a (@hits) {
+						return $hit->{id} if index($a->{name}, $artist) >= 0 || index($artist, $a->{name}) >= 0;
+					}
+				}
+			}
+			return $json->{result}{songs}[0]{id};
+		}
+		return;
+	};
+
+	# 前向声明 — 其他 handler 后面也会用到
+	my ($ensure_track_ids, $search_artist_id, $search_album_id);
 
 	my $netease_lyrics_wrapper = sub {
 		my $request = shift;
@@ -228,19 +265,38 @@ sub initPlugin {
 		my $title   = $request->getParam('title')    || '';
 		my $artist  = $request->getParam('artist')   || '';
 
-		# 参数 dump（调试用，每次 CLI 调用都打出来）
-		$log->debug("lyrics CLI request: track_id=[$trackId] url=[$url] title=[$title] artist=[$artist]") if $log->is_debug;
+		# Material Skin 歌词 CLI 不传 title/artist！从 LMS DB 反查 Track
+		if ( !$title || !$artist ) {
+			if ( $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
+				my $trackObj = Slim::Schema->find('Track', $trackId);
+				if ($trackObj) {
+					if ( !$title && $trackObj->title ) { $title = $trackObj->title; }
+					if ( !$artist ) {
+						my $a = $trackObj->artist;
+						if ( ref($a) ) {
+							# Contributor 对象 — 调 name()
+							if ( ref($a) eq 'ARRAY' ) {
+								$artist = join('/', map { ref($_) ? $_->name : $_ } @$a);
+							} elsif ( $a->can('name') ) {
+								$artist = $a->name;
+							}
+						} else {
+							$artist = $a if $a;
+						}
+					}
+					$log->info("lyrics: DB track=$trackId → title=[$title] artist=[$artist]");
+				}
+			}
+		}
+
+		$log->info("lyrics CLI: track_id=[$trackId] url=[$url] title=[$title] artist=[$artist]");
 
 		# === 1. 优先尝试本地 .lrc 文件 ===
-		# 返回值：
-		#   字符串 → 成功命中（可能已转换 JSON→LRC）
-		#   undef  → 没找到或非本地文件 → 走网易云后端 / MAI fallback
 		my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist);
+		$log->info("lyrics step1: local_lrc = " . (defined($local_lrc) ? length($local_lrc) . " bytes" : "undef"));
 
 		if ($local_lrc && length($local_lrc)) {
 			$request->setStatusProcessing();
-
-			# 本地文件可能是网易云 JSON 格式 → 转成标准 LRC
 			$local_lrc = _convert_netease_lrc($local_lrc);
 
 			my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
@@ -255,30 +311,26 @@ sub initPlugin {
 			return;
 		}
 
-		# === 2. 本地没命中 → 判断是否网易云轨道 ===
-		# 网易云 song id 提取（多种格式都能抓到）
+		# === 2. 本地没命中 → 提取 sid ===
 		my $sid;
 		if ( $url =~ m{netease://track/(\d+)} ) {
-			# 原始 URL: netease://track/1396343703
 			$sid = $1;
 		}
 		elsif ( $trackId =~ m{^(\d{7,})$} ) {
-			# 纯数字 track_id（LMS DB 对象）
 			$sid = $1;
 		}
 		elsif ( $url =~ m{(\d{7,})} ) {
-			# 代理流 URL 里藏着的网易云 song id（任何 7+ 位数字串）
-			# 代理流如 http://host:port/stream.mp3?...netease_track_id=1396343703...
 			$sid = $1;
 		}
+		$log->info("lyrics step2: extracted sid = " . ($sid // 'undef'));
 
 		# 不是网易云 → 看 overrideMAI 设置
 		if ( !$sid ) {
 			if ($prefs->get('overrideMAI') // 1) {
-				# 完全接管：主动搜网易云
+				$log->info("lyrics step3: searching NetEase for title=[$title] artist=[$artist]");
 				$sid = $search_track_id->($title, $artist);
+				$log->info("lyrics step3b: search returned sid = " . ($sid // 'undef'));
 				if ( !$sid ) {
-					# 网易云也搜不到 → 返回空
 					$request->setStatusDone();
 					return;
 				}
@@ -437,21 +489,6 @@ sub initPlugin {
 		return;
 	};
 
-	# 通用 HTTP 同步请求（简介数据量小，同步没问题）
-	my $fetch_backend = sub {
-		my ($apiUrl) = @_;
-		require LWP::Simple;
-		require JSON::XS;
-		my $prefs   = preferences('plugin.netease');
-		my $apiBase = $prefs->get('apiBase') || 'http://127.0.0.1:3000';
-		my $fullUrl = $apiBase . $apiUrl;
-		my $content = eval { LWP::Simple::get( $fullUrl, timeout => 8 ) };
-		return unless $content;
-		my $json = eval { JSON::XS::decode_json($content) };
-		return unless $json && ref($json) eq 'HASH' && $json->{code} == 200;
-		return $json;
-	};
-
 	# 从 song.detail 兜底查 artist_id / album_id（缓存没有时用）
 	my $ensure_track_ids = sub {
 		my ($sid) = @_;
@@ -500,26 +537,6 @@ sub initPlugin {
 		return @parts;
 	};
 
-	# 从网易云搜索 API 兜底找 artist_id（单个）
-	my $search_track_id = sub {
-		my ($title, $artist) = @_;
-		return unless ($title || $artist);
-		my $kw = $artist && $title ? "$artist $title" : ($title || $artist);
-		my $json = $fetch_backend->("/search?keywords=" . URI::Escape::uri_escape_utf8($kw) . "&type=1&limit=3");
-		if ( $json && $json->{result} && $json->{result}{songs} && @{ $json->{result}{songs} || [] } ) {
-			# 挑艺人名匹配的
-			if ($artist) {
-				for my $hit ( @{ $json->{result}{songs} } ) {
-					my @hits = @{ $hit->{artists} || [] };
-					for my $a (@hits) {
-						return $hit->{id} if index($a->{name}, $artist) >= 0 || index($artist, $a->{name}) >= 0;
-					}
-				}
-			}
-			return $json->{result}{songs}[0]{id};
-		}
-		return;
-	};
 	my $search_artist_id = sub {
 		my ($name, $trackTitle) = @_;
 		return unless $name;
