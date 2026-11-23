@@ -213,6 +213,9 @@ sub initPlugin {
 	# 如果 addDispatch 返回 undef 说明之前没人注册过——那 MAI 可能还没加载，
 	# 我们就用延迟 timer 等到 MAI 加载完再覆盖。
 
+	# 前向声明 — lyrics handler (line ~270) 会用到，实际定义在后面 (line ~492)
+	my ($search_track_id);
+
 	my $netease_lyrics_wrapper = sub {
 		my $request = shift;
 
@@ -579,6 +582,38 @@ sub initPlugin {
 		return ($name, $bio);
 	};
 
+	# === 从 LMS DB 反查 track 信息 ===
+	# Material Skin 可能只传 track_id，没传 artist/album/title 名字。
+	# 这个 helper 从 DB 里补齐。
+	my $resolve_track_info = sub {
+		my ($request) = @_;
+		my $trackId = $request->getParam('track_id') || '';
+		my $title   = $request->getParam('title')    || '';
+		my $artist  = $request->getParam('artist')   || '';
+		my $album   = $request->getParam('album')    || '';
+
+		if ( $trackId && $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
+			my $track = Slim::Schema->find('Track', $trackId);
+			if ($track) {
+				$title  ||= $track->title  if $track->title;
+				$album  ||= $track->album  ? $track->album->name : '';
+				if (!$artist) {
+					if ($track->can('artists') && $track->artists) {
+						my @anames;
+						for my $a ($track->artists) {
+							push @anames, $a->name if $a->name;
+						}
+						$artist = join(', ', @anames);
+					}
+					elsif ($track->artist && $track->artist->name) {
+						$artist = $track->artist->name;
+					}
+				}
+			}
+		}
+		return { title => $title, artist => $artist, album => $album };
+	};
+
 	# biography handler（支持多艺人）
 	my $netease_biography_handler = sub {
 		my $request = shift;
@@ -605,10 +640,11 @@ sub initPlugin {
 
 		# 尝试 3: 网易云搜索（artist 名字，支持多艺人）
 		if ( !@artistIds ) {
-			my $artistName = $request->getParam('artist') || '';
+			my $info = $resolve_track_info->($request);
+			my $artistName = $info->{artist};
 			my @names = $split_names->($artistName);
 			for my $n (@names) {
-				my $aid = $search_artist_id->($n, $request->getParam('title'));
+				my $aid = $search_artist_id->($n, $info->{title});
 				push @artistIds, $aid if $aid;
 			}
 		}
@@ -677,12 +713,17 @@ sub initPlugin {
 		}
 
 		if ( !$albumId ) {
-			my $albumName = $request->getParam('album') || '';
-			my $artistName = $request->getParam('artist') || '';
+			my $info = $resolve_track_info->($request);
+			my $albumName = $info->{album};
+			my $artistName = $info->{artist};
 			my @names = $split_names->($artistName);
 			for my $n (@names) {
 				$albumId = $search_album_id->($albumName, $n);
 				last if $albumId;
+			}
+			# 如果多艺人没匹配到，直接用 album 名字搜一次
+			if ( !$albumId && $albumName ) {
+				$albumId = $search_album_id->($albumName, '');
 			}
 		}
 
