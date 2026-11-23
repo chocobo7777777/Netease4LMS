@@ -38,19 +38,10 @@ Squeezebox Server）插件，用于浏览网易云音乐账号下的歌单、在
 - **下载队列监控页**：`设置 → 插件 → 下载队列` 实时显示当前任务进度
   （已处理/总数、已存/跳过/失败计数）、排队任务、最近 30 条历史及错误信息；
   支持取消排队/运行中的任务、清空历史，有任务活动时页面每 4 秒自动刷新。
-- **网易云曲目"正在播放"页信息**：对 Material Skin 等客户端的"正在播放"页，
-  网易云曲目的 **歌词**、**艺术家简介**、**专辑介绍** 直接从网易云获取，替代
-  MAI（MusicArtistInfo）插件的维基百科/在线搜索链路，更准确且不再超时：
-  - **歌词**：调自建后端 `/lyric?id=<songId>`，返回 LRC 原文 + 翻译；
-  - **艺术家简介**：调 `/artists?id=<artist_id>`，取 `briefDesc`；支持多艺人曲目，
-    每个艺人分别查并拼接；
-  - **专辑介绍**：调 `/album?id=<album_id>`，取 `description`；
-  - **维基屏蔽**：workreview / artistphoto / artistphotos / albumcovers 对网易云
-    曲目直接返回空（网易云没有对应 API，也避免维基请求卡死 LMS）。
-  - 所有非网易云曲目透明 fallback 给 MAI 原始 handler，完全不影响 MAI 功能。
-  - 实现方式是 initPlugin 中 **override MAI 的 CLI 命令**（`addDispatch` 替换
-    `musicartistinfo lyrics|biography|albumreview|...`），绕过 Material Skin 前端
-    硬编码的 MAI CLI 调用。详情见 7.5 节。
+- **网易云曲目"正在播放"页信息**：Material Skin、SqueezePlay 等客户端
+  播放网易云曲目时，**歌词**、**艺术家简介**、**专辑介绍** 直接从网易云获取，
+  替代 MAI（MusicArtistInfo）插件的维基百科/在线搜索链路，内容更准确且不再超时。
+  所有非网易云曲目保持 MAI 原样工作。实现细节见 DEVELOP.md。
 
 ---
 
@@ -382,55 +373,16 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
 2. **歌单浏览页**：进入 `我的歌单 → 某个歌单`，最后一项也是"下载此歌单"。
 3. **条目操作菜单（右键 / 长按 / 三点菜单）**：
 
-   | 位置 | 条目 | 菜单项 | 实际执行 |
-   | --- | --- | --- | --- |
-   | `网易云音乐 → 我的歌单` | 每个歌单 | 下载此歌单 | `netease download playlist <playlistId>` |
-   | 顶层入口 | 每日推荐 | 下载此歌单 | `netease download feed daily` |
-   | 顶层入口 | 我喜欢的音乐 | 下载此歌单 | `netease download feed liked` |
-   | 顶层入口 | 推荐新歌 | 下载此歌单 | `netease download feed new` |
-   | 歌单内曲目列表（`我的歌单 → 歌单`、每日推荐、我喜欢的音乐、推荐新歌、搜索结果） | 每首可播放曲目 | 下载这首歌 | `netease download track <songId>` |
-   | `网易云音乐 → 我的歌单` | 每个歌单 | 存为本地歌单 | `netease savetolocal playlist <playlistId>` |
-   | 顶层入口 | 每日推荐 / 我喜欢的音乐 / 推荐新歌 | 存为本地歌单 | `netease savetolocal feed <daily\|liked\|new>` |
+   | 位置 | 菜单项 | 实际执行 |
+   | --- | --- | --- |
+   | 歌单列表（我的歌单、每日推荐、我喜欢的音乐、推荐新歌） | 下载此歌单 | `netease download playlist/feed <id>` |
+   | 歌单内每首曲目 | 下载这首歌 | `netease download track <songId>` |
+   | 歌单列表 | 存为本地歌单 | `netease savetolocal playlist/feed <id>` |
 
-   实现方式是给条目加 LMS 原生字段 `jive => { actions => { ... } }`：
-   `Slim::Control::XMLBrowser` 会把这些动作合并进条目的 `actions` 哈希
-   （见 LMS 源码该文件约 1347–1350 行的 `$item->{jive}{actions}` 合并逻辑），
-   动作对象使用的键是 `cmd`（不是 `command`），值为完整 CLI 命令数组。
-
-   进入下载队列的路径：
-
-   - 歌单 / 单曲：`netease download playlist|track <id>` → `cliDownload` →
-     `Downloader->downloadPlaylist/downloadTrack`（原有队列）；
-   - 内置 feed（每日推荐/我喜欢的音乐/推荐新歌）：`netease download feed <daily|liked|new>`
-     → `Downloader->downloadFeed`，先按接口重新拉取该入口的曲目
-     （`getDailySongs` / `getLikedSongs`（每页 300 首）/ `getNewSongs`），
-     再交给与歌单下载共用的 `_run_tracklist` → `_process_tracks` → `_download_file`。
-     没有另写一套下载流程；"我喜欢的音乐"按 `FEED_PAGE_SIZE => 300` 分页取全量。
-   - feed 任务在队列监控页的"任务"列显示 `每日推荐` / `我喜欢的音乐` /
-     `推荐新歌`；落盘子目录为 ASCII 名 `DailyRecommendations/`、`LikedSongs/`、
-     `NewSongs/`（避免与非 ASCII 的下载根目录路径拼接时出现编码问题）。
-
-   **显示限制**（重要）：
-
-   - LMS **默认网页皮肤**（`HTML/Default/xmlbrowser.html`）对每个条目只渲染
-     `playLink / insertLink / addLink / removeLink / mixersLink` 五个槽位，
-     没有渲染任意自定义动作的模板逻辑 → 网页列表里看不到这些菜单项；
-   - **Material Skin** 的第三方动作入口 `registerCustomAction($section, $action)`
-     是 section 级的，且前端取 `playlist-track` 等 section 动作时不带 `filter`，
-     会把"下载"挂到同 section 的所有条目（包括本地音乐库曲目），违反"只在网易云
-     条目生效"的要求，因此**不采用**；插件自定义 feed 的条目通常也落不进这些 section；
-   - 能读取条目 `actions` 的客户端（如 SqueezePlay/iPeng 这类基于 jive 数据模型的
-     控制器）会按 `title` 显示这两个动作；
-   - 因此**网页界面里稳定可用的入口仍是**：`我的歌单 → 歌单` 末尾的"下载此歌单"，
-     以及 `网易云音乐 → 下载 → 歌单` 里的"下载此歌单 / 下载：歌手 - 歌名"。
-     插件自定义 feed 的条目没有本地库 `_id:` 前缀，Material Skin 的条目菜单也不会
-     为它们生成下载动作，所以没有对 favorites / 本地曲目误挂风险——动作只写在
-     本插件自己返回的条目上。
-
-   LMS 8.x 与 9.x 的差异：`jive.actions` 合并逻辑在 8.x、9.x 都存在且写法一致；
-   差别在网页模板——默认皮肤始终只认上面五个槽位，因此 8.x / 9.x 网页端都不会显示
-   这两个自定义动作。插件按 8.x 的写法（`jive => { actions => { name => { cmd => [...],
-   title => ... } } }`）实现，9.x 可原样运行。
+   > **注意**：LMS 默认网页皮肤和 Material Skin 都不渲染插件自定义条目动作
+   > （框架限制，详见 DEVELOP.md），所以网页界面里稳定可用的入口是
+   > `网易云音乐 → 下载` 子菜单，以及歌单页末尾的"下载此歌单"。
+   > SqueezePlay / iPeng 这类基于 jive 的客户端会正常显示右键菜单。
 
 4. **CLI / JSON-RPC**：
 
@@ -442,8 +394,8 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
    netease download feed liked     # 我喜欢的音乐
    netease download feed new       # 推荐新歌
    netease savetolocal playlist 123456   # 网易云歌单 → LMS 本地 playlist
-   netease savetolocal feed daily        # 每日推荐 → LMS 本地 playlist
-   netease lyrics 347230                 # 查歌词（首次返回 queued，缓存命中后返回完整字段）
+   netease savetolocal feed daily
+   netease lyrics 347230                 # 查歌词
    ```
 
    ```powershell
@@ -451,40 +403,6 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
    curl.exe "http://127.0.0.1:9000/jsonrpc.js" `
      --data '{"id":1,"method":"netease","params":["download","playlist","123456"]}'
    ```
-
-5. **歌词获取**（Material Skin "正在播放"页 tab + CLI `netease lyrics <trackId>`）：
-
-   网易云曲目的歌词、艺术家简介、专辑介绍全部通过 override MAI（MusicArtistInfo）
-   CLI 命令获取，数据链路、缓存策略、fallback 机制详见 **7.5 节**。
-
-6. **存为本地歌单机制**（`netease savetolocal`）：
-
-   CLI 命令是异步的（网易云 API 全走回调链，不能在同步请求里等结果），
-   命令返回 "save queued" 后在事件循环下一个 tick 启动。内部流程：
-
-   1. 调 `getAllPlaylistTracks` / `getDailySongs` / `getLikedSongs` / `getNewSongs`
-      拉曲目列表（"我喜欢的音乐"按 300 首一页拉全）；
-   2. 生成 `netease://track/<songId>` URL 数组；
-   3. 保存当前播放队列 → `playlist clear` →
-      `playlist addtracks listRef [url1, url2, ...]` →
-      `playlist save _title=<name> silent=1` → 恢复原队列。
-
-   为什么能接受自定义 scheme：`playlist addtracks` 的 `listRef` 分支接受 Perl
-   ARRAY ref，元素原样传给 `Slim::Player::Playlist::addTracks`，后者不做 scheme
-   校验（Material Skin 自身就用这条路径塞 `randomplay://`）。存进本地 playlist
-   后播放时，`netease://` 会走本插件的 ProtocolHandler 解析真实 URL。
-
-   本地 playlist 名统一加"网易云 - "前缀；同名已存在时自动加时间戳避免覆盖。
-   歌单条目动作只对本插件自己返回的歌单生效（`我的歌单` 列表里的每一项），
-   内置 feed 顶层入口同样有效。**单曲条目未单独做 savetolocal 动作**——单曲存为
-   本地歌单需要交互选歌单（Material Skin 的 `ADD_TO_PLAYLIST_ACTION` 内置对话框），
-   如果网易云曲目能被它识别为 `saveableTrack`，右键菜单里应该已经能看到"加入播放列表"；
-   `我的歌单` 是容器条目，Material Skin 的内置动作不会对容器节点生效，所以
-   歌单条目的 savetolocal 必须靠我们自己的条目动作。
-
-   下载是异步的，命令只负责入队；进度看下载队列监控页（`设置 → 插件 → 下载队列`）
-   或 LMS 日志（日志分类 `plugin.netease`）。仍保留 `netease download all` 作为
-   CLI 的批量入口，但浏览菜单里不再提供"一键下载全部"的按钮。
 
 ### 7.2 下载队列监控页
 
@@ -529,69 +447,6 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/login/status
   无损通常需要 VIP，普通账号可能只能拿到标准/较高音质。
 - 下载完成后不会自动加入 LMS 音乐库；需要把目录加入音乐库并触发扫描。
 
-### 7.5 "正在播放"页歌词 / 艺术家简介 / 专辑介绍（Material Skin 等）
-
-LMS 生态里没有统一的"第三方歌词/简介"API——Material Skin、SqueezePlay、iPeng
-等客户端的"正在播放"页信息 tab 都是 **硬编码调 MAI（MusicArtistInfo）插件**
-的 CLI 命令（`musicartistinfo lyrics` / `biography` / `albumreview`），
-而不是走 LMS 的 TrackInfo infoProvider 系统。MAI 对网易云曲目的维基百科请求
-不仅超时率高（维基对中文搜索不稳定），内容也不是网易云官方简介。
-
-因此本插件在 `initPlugin` 里通过 `Slim::Control::Request::addDispatch` **override
-了 MAI 的 7 个 CLI 命令**：
-
-| MAI CLI 命令 | 网易云曲目行为 | 非网易云曲目行为 |
-| --- | --- | --- |
-| `lyrics` | 调自建后端 `/lyric?id=<songId>`，LRC + 翻译 | fallback MAI 原始 handler |
-| `biography` | 调 `/artists?id=<artist_id>` 取 `briefDesc`；支持多艺人，每个查后拼接 | fallback MAI 原始 handler |
-| `albumreview` | 调 `/album?id=<album_id>` 取 `description` | fallback MAI 原始 handler |
-| `workreview` | 返回空（网易云无对应 API） | fallback MAI 原始 handler |
-| `artistphoto` / `artistphotos` | 返回空（网易云无对应 API，也屏蔽维基超时） | fallback MAI 原始 handler |
-| `albumcovers` | 返回空（网易云无对应 API） | fallback MAI 原始 handler |
-
-#### ID 解析顺序（biography / albumreview）
-
-Material Skin 调 biography/albumreview 时不一定传 `artist_id:` / `album_id:`，
-只传 `artist:<名字>` / `album:<名字>` 也常见。我们按以下顺序解析 ID：
-
-1. **参数直接给了** `artist_id` / `album_id` → 直接用；
-2. **从 song_id 缓存拿**：从 URL / track_id 提取网易云 song_id → 查 `netease_meta_<sid>`
-   缓存中的 `artist_ids` / `album_id`（ProtocolHandler.scanUrl 时预热）；
-3. **网易云搜索 API 兜底**：`/search?keywords=<名字>&type=100`（artist）或
-   `type=10`（album），取第一条结果的 id；多艺人时先按 `,，;&／/` 拆分再逐个搜；
-4. **彻底没线索** → fallback MAI 原始 handler（走维基）。
-
-搜索 API 用 `URI::Escape::uri_escape_utf8` 处理中文名字。
-
-#### 缓存
-
-| 缓存键 | 值 | 备注 |
-| --- | --- | --- |
-| `netease_lyric_<sid>` | LRC 原文（UTF-8 bytes） | 永久（自建后端返回稳定） |
-| `netease_meta_<sid>` | `{title, artist, album, artist_ids[], album_id, ...}` | 24h（ProtocolHandler 元数据缓存） |
-| `netease_bio_<artist_id>` | `briefDesc`（UTF-8 bytes） | 永久 |
-| `netease_albdesc_<album_id>` | `description`（UTF-8 bytes） | 永久 |
-
-所有写缓存前 `Encode::encode_utf8`，读后 `decode_utf8`——LMS DbCache 底层 Storable
-对 wide character 做 binary 序列化会 panic（`Wide character in subroutine entry at
-DbCache.pm line 78`）。
-
-#### fallback 机制
-
-initPlugin 中先判断 `Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI')`
-等是否存在——MAI 已加载则直接 override；若 MAI 未加载（插件顺序），则设 5 秒 timer
-重试。每个 handler 内部再调一次 `can()` 取原始 handler 引用，避免 override 顺序
-影响 fallback。
-
-#### 验证
-
-| 命令 | 预期 |
-| --- | --- |
-| `musicartistinfo lyrics html:1 url:netease://track/1396343703` | `result.lyrics` = LRC 字符串 |
-| `musicartistinfo biography html:1 artist_id:6452` | `result.biography` = 周杰伦简介 |
-| `musicartistinfo albumreview html:1 album_id:18905` | `result.albumreview` = 叶惠美专辑介绍 |
-| 以上命令对非网易云曲目（本地库 / 其他协议） | 正常返回 MAI 维基搜索结果 |
-
 ---
 
 ## 8. 凭据安全
@@ -632,57 +487,3 @@ initPlugin 中先判断 `Plugins::MusicArtistInfo::TrackInfo->can('getSongLyrics
   `API base URL`。
 - **手机号登录要求验证码**：设置页会显示验证码图片，输入图中字符后再次点击登录
   即可；仍失败时改用扫码或 Cookie 登录。
-
----
-
-## 10. 条目操作菜单：实现说明与验证清单
-
-### 10.1 实现位置
-
-- 歌单条目：`Plugin.pm` 的 `playlistsFeed`（`我的歌单` 列表），动作名
-  `neteaseDownload`，标题 `PLUGIN_NETEASE_ACTION_DL_PLAYLIST`（"下载此歌单"），
-  命令 `['netease','download','playlist','<playlistId>']`；
-- 顶层内置入口：`Plugin.pm` 的 `handleFeed` 中 `每日推荐`、`我喜欢的音乐`、
-  `推荐新歌` 三项，通过 `_feed_download_action($client, 'daily|liked|new')`
-  挂载同一个标题，命令 `['netease','download','feed','<daily|liked|new>']`；
-- 曲目条目：`Plugin.pm` 的 `_track_items`（所有曲目列表共用的渲染函数），
-  动作名 `neteaseDownload`，标题 `PLUGIN_NETEASE_ACTION_DL_TRACK`（"下载这首歌"），
-  命令 `['netease','download','track','<songId>']`；
-- 所有命令都落到已注册的 `netease download _what _id` 分发（`Plugin.pm` 的
-  `cliDownload`）：playlist/track 走原有 `downloadPlaylist/downloadTrack`；
-  feed 走 `Downloader->downloadFeed`，它只负责按接口重新取曲目，之后仍调用
-  与歌单下载共用的 `_run_tracklist/_process_tracks/_download_file`。
-  **没有新增独立的下载实现**。
-- 动作只存在于本插件返回的条目上；`favorites`、本地音乐库等其他菜单不经过这些
-  feed，因此不会被挂上"下载"动作。
-- 不含"下载"动作的顶层入口：`搜索歌曲`（关键词是动态请求参数，无法稳定编码进
-  动作命令）、`我的歌单` 容器与 `下载` 入口本身（前者的叶子歌单已各自带动作，
-  后者本身就是下载页面）。
-
-### 10.2 已完成的静态验证
-
-| 检查项 | 方式 | 结果 |
-| --- | --- | --- |
-| Perl 语法 | `perl -c`（API/Downloader/Downloads/ProtocolHandler/Settings/Plugin） | 全部 syntax OK |
-| 文案 token | 代码中引用的 `PLUGIN_NETEASE_*` 与 `strings.txt` 定义比对 | 无缺失（`PLUGIN_NETEASE_ACTION_DL_TRACK` / `_DL_PLAYLIST` 均已定义 EN/ZH_CN） |
-| 模板标签配对 | `basic.html`、`downloads.html` 的 `[%` / `%]` 计数 | 111/111、93/93 |
-| 下载器逻辑 | 歌单与 feed 都走 `_run_tracklist` → `_process_tracks` → `_download_file` | 共用同一套写盘/跳过/重试逻辑 |
-
-### 10.3 真实 LMS 上的验证步骤（**未验证**）
-
-> 以下步骤尚未在真实 LMS 服务器上执行，结果待验证。
-
-1. 升级插件（`install.xml` 版本 0.1.30）并重启 LMS；
-2. 打开 `设置 → 插件 → NetEase Cloud Music`，确认版本号为 0.1.30；
-3. 用支持 jive 条目动作的控制器（如 SqueezePlay）连接同一台 LMS：
-   - 进入 `我的应用 → 网易云音乐 → 我的歌单`，长按/右键任一歌单，应出现"下载此歌单"；
-   - 在顶层长按/右键 `每日推荐`、`我喜欢的音乐`、`推荐新歌`，应出现"下载此歌单"；
-   - 进入任一歌单/每日推荐/推荐新歌的曲目列表，长按/右键任一可播放曲目，
-     应出现"下载这首歌"；
-4. 触发后打开 `设置 → 插件 → 下载队列`，应能看到新任务入队并开始下载；
-   下载整份 `每日推荐`/`我喜欢的音乐`/`推荐新歌` 时，"任务"列应为对应中文名称，
-   文件落在 `DailyRecommendations/`、`LikedSongs/`、`NewSongs/` 子目录；
-5. 也可用 CLI 直接验证 feed 分支：`netease download feed daily|liked|new`；
-6. 对照检查：在 LMS 默认网页或 Material Skin 中长按/右键同类条目，预期**不出现**
-   这些自定义动作（框架限制，见 7.1），此时改用"下载"子菜单/歌单页末尾入口；
-7. 回归检查：在 favorites 与本地音乐库条目上操作，不应出现"下载这首歌/下载此歌单"。
