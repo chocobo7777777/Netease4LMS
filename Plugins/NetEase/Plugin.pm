@@ -638,11 +638,24 @@ sub initPlugin {
 			}
 		}
 
-		# 尝试 3: 网易云搜索（artist 名字，支持多艺人）
+		# 尝试 3: 先搜 track 拿 SID，再从网易云 track API 拿完整 artist_ids
 		if ( !@artistIds ) {
 			my $info = $resolve_track_info->($request);
-			my $artistName = $info->{artist};
-			my @names = $split_names->($artistName);
+			my $sid = $search_track_id->($info->{title}, $info->{artist});
+			$log->info("biography try3: title=[$info->{title}] artist=[$info->{artist}] sid=" . ($sid // 'undef'));
+			if ($sid) {
+				my $meta = $ensure_track_ids->($sid);
+				$log->info("biography try3: artist_ids from ensure = " . ($meta->{artist_ids} ? join(',', @{$meta->{artist_ids}}) : 'undef'));
+				if ( ref($meta->{artist_ids}) eq 'ARRAY' ) {
+					push @artistIds, @{ $meta->{artist_ids} };
+				}
+			}
+		}
+
+		# 尝试 4: 兜底 - 逐个艺人名字搜
+		if ( !@artistIds ) {
+			my $info = $resolve_track_info->($request);
+			my @names = $split_names->($info->{artist});
 			for my $n (@names) {
 				my $aid = $search_artist_id->($n, $info->{title});
 				push @artistIds, $aid if $aid;
@@ -713,17 +726,24 @@ sub initPlugin {
 		}
 
 		if ( !$albumId ) {
+			# 先搜 track 拿 SID → ensure_track_ids 拿 album_id（和在线版本一致）
 			my $info = $resolve_track_info->($request);
-			my $albumName = $info->{album};
-			my $artistName = $info->{artist};
-			my @names = $split_names->($artistName);
-			for my $n (@names) {
-				$albumId = $search_album_id->($albumName, $n);
-				last if $albumId;
+			my $sid = $search_track_id->($info->{title}, $info->{artist});
+			if ($sid) {
+				my $meta = $ensure_track_ids->($sid);
+				$albumId = $meta->{album_id} if $meta->{album_id};
 			}
-			# 如果多艺人没匹配到，直接用 album 名字搜一次
-			if ( !$albumId && $albumName ) {
-				$albumId = $search_album_id->($albumName, '');
+
+			# 兜底：用 album 名字搜
+			if ( !$albumId ) {
+				my @names = $split_names->($info->{artist});
+				for my $n (@names) {
+					$albumId = $search_album_id->($info->{album}, $n);
+					last if $albumId;
+				}
+				if ( !$albumId && $info->{album} ) {
+					$albumId = $search_album_id->($info->{album}, '');
+				}
 			}
 		}
 
