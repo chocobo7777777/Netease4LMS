@@ -253,43 +253,17 @@ sub initPlugin {
 		return;
 	};
 
-	# 前向声明 — 其他 handler 后面也会用到
-	my ($ensure_track_ids, $search_artist_id, $search_album_id);
+	# 前向声明 — 所有 handler 都要用到（Perl 闭包抓的是变量容器，后面赋值不加 my！）
+	my ($resolve_track_info, $ensure_track_ids, $search_artist_id, $search_album_id);
 
 	my $netease_lyrics_wrapper = sub {
 		my $request = shift;
 
-		# 从 request 里拿 url / track_id / title / artist 参数
-		my $url     = $request->getParam('url')      || '';
-		my $trackId = $request->getParam('track_id') || '';
-		my $title   = $request->getParam('title')    || '';
-		my $artist  = $request->getParam('artist')   || '';
+		# resolve_track_info 统一处理所有 DB 反查 + player session 兜底 + sid 提取
+		my $info = $resolve_track_info->($request);
+		my ($url, $trackId, $title, $artist, $sid) = @{$info}{qw(url track_id title artist sid)};
 
-		# Material Skin 歌词 CLI 不传 title/artist！从 LMS DB 反查 Track
-		if ( !$title || !$artist ) {
-			if ( $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
-				my $trackObj = Slim::Schema->find('Track', $trackId);
-				if ($trackObj) {
-					if ( !$title && $trackObj->title ) { $title = $trackObj->title; }
-					if ( !$artist ) {
-						my $a = $trackObj->artist;
-						if ( ref($a) ) {
-							# Contributor 对象 — 调 name()
-							if ( ref($a) eq 'ARRAY' ) {
-								$artist = join('/', map { ref($_) ? $_->name : $_ } @$a);
-							} elsif ( $a->can('name') ) {
-								$artist = $a->name;
-							}
-						} else {
-							$artist = $a if $a;
-						}
-					}
-					$log->info("lyrics: DB track=$trackId → title=[$title] artist=[$artist]");
-				}
-			}
-		}
-
-		$log->info("lyrics CLI: track_id=[$trackId] url=[$url] title=[$title] artist=[$artist]");
+		$log->info("lyrics: netease=$info->{is_netease} sid=" . ($sid // '') . " t=[$title] a=[$artist]");
 
 		# === 1. 优先尝试本地 .lrc 文件 ===
 		my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist);
@@ -311,18 +285,8 @@ sub initPlugin {
 			return;
 		}
 
-		# === 2. 本地没命中 → 提取 sid ===
-		my $sid;
-		if ( $url =~ m{netease://track/(\d+)} ) {
-			$sid = $1;
-		}
-		elsif ( $trackId =~ m{^(\d{7,})$} ) {
-			$sid = $1;
-		}
-		elsif ( $url =~ m{(\d{7,})} ) {
-			$sid = $1;
-		}
-		$log->info("lyrics step2: extracted sid = " . ($sid // 'undef'));
+		# === 2. 本地没命中 → sid 已从 resolve_track_info 拿到 ===
+		$log->info("lyrics step2: sid = " . ($sid // 'undef'));
 
 		# 不是网易云 → 看 overrideMAI 设置
 		if ( !$sid ) {
@@ -602,115 +566,137 @@ sub initPlugin {
 		return ($name, $bio);
 	};
 
-	# === 从 LMS DB 反查 track 信息 ===
-	# Material Skin 可能只传 track_id，没传 artist/album/title 名字。
-	# 这个 helper 从 DB 里补齐。
-	my $resolve_track_info = sub {
+	# === 统一 track 信息解析 ===
+	# 整合：player session 兜底 + DB 反查 + sid 提取 + is_netease 判断
+	# 返回: { title, artist, album, url, track_id, sid, is_netease }
+	# 注意：赋值不加 my！前向声明已在 line 257，加 my 会创建新变量导致闭包崩溃
+	$resolve_track_info = sub {
 		my ($request) = @_;
+		my $url     = $request->getParam('url')      || '';
 		my $trackId = $request->getParam('track_id') || '';
 		my $title   = $request->getParam('title')    || '';
 		my $artist  = $request->getParam('artist')   || '';
 		my $album   = $request->getParam('album')    || '';
 
-		# 从 track_id 反查 DB
+		# Material Skin 常只传 artist_id/album_id，不传 url/track_id/title/artist！
+		# 从 Player session 拿当前正在播放的 track 补全
+		if ( !$url && !$trackId && !$title && !$artist ) {
+			my $player = eval { $request->player() };
+			if ($player) {
+				my $curTrack = eval { $player->playingTrack() } || eval { $player->currentTrack() };
+				if ($curTrack) {
+					if ( !$url && $curTrack->can('url') && $curTrack->url ) { $url = $curTrack->url; }
+					if ( !$trackId && $curTrack->can('id') && $curTrack->id ) { $trackId = $curTrack->id; }
+					if ( !$title && $curTrack->can('title') && $curTrack->title ) { $title = $curTrack->title; }
+					if ( !$artist ) {
+						if ( $curTrack->can('artists') && $curTrack->artists ) {
+							my @anames;
+							for my $a ($curTrack->artists) {
+								push @anames, ref($a) ? ($a->name // $a) : $a;
+							}
+							$artist = join(', ', @anames) if @anames;
+						} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
+							my $a = $curTrack->artist;
+							$artist = ref($a) ? ($a->name // '') : ($a // '');
+						}
+					}
+					if ( !$album && $curTrack->can('album') && $curTrack->album ) {
+						my $alb = $curTrack->album;
+						$album = ref($alb) ? ($alb->name // '') : ($alb // '');
+					}
+				}
+			}
+		}
+
+		# 从 track_id 反查 DB（如果还缺 title/artist）
 		if ( $trackId && $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
 			my $track = Slim::Schema->find('Track', $trackId);
 			if ($track) {
 				$title  ||= $track->title  if $track->title;
-				$album  ||= $track->album  ? $track->album->name : '';
+				$album  ||= $track->album  ? (ref($track->album) ? $track->album->name : $track->album) : '';
 				if (!$artist) {
 					if ($track->can('artists') && $track->artists) {
 						my @anames;
-						for my $a ($track->artists) {
-							push @anames, $a->name if $a->name;
-						}
+						for my $a ($track->artists) { push @anames, $a->name if $a->name; }
 						$artist = join(', ', @anames);
-					}
-					elsif ($track->artist && $track->artist->name) {
-						$artist = $track->artist->name;
+					} elsif ($track->can('artist') && $track->artist) {
+						my $a = $track->artist;
+						$artist = ref($a) ? ($a->name // '') : ($a // '');
 					}
 				}
 			}
 		}
 
-		# 从 artist_id 反查 DB（Material Skin 常只传这个，是 LMS DB 自增 ID）
+		# artist_id / album_id DB 反查（补充 artist/album）
 		if ( !$artist && (my $aid = $request->getParam('artist_id')) ) {
 			if ( $aid =~ /^\d+$/ && Slim::Schema->can('find') ) {
-				my $artistObj = Slim::Schema->find('Contributor', $aid)
-					|| Slim::Schema->find('Artist', $aid);
-				if ($artistObj) {
-					$artist = $artistObj->name if $artistObj->name;
-					$log->info("resolve_track_info: artist_id=$aid → DB name=[$artist]");
-				} else {
-					$log->info("resolve_track_info: artist_id=$aid → NOT FOUND in DB");
-				}
+				my $artistObj = Slim::Schema->find('Contributor', $aid) || Slim::Schema->find('Artist', $aid);
+				if ($artistObj && $artistObj->name) { $artist = $artistObj->name; }
 			}
 		}
-
-		# 从 album_id 反查 DB
 		if ( !$album && (my $alid = $request->getParam('album_id')) ) {
 			if ( $alid =~ /^\d+$/ && Slim::Schema->can('find') ) {
 				my $albumObj = Slim::Schema->find('Album', $alid);
-				if ($albumObj) {
-					$album = $albumObj->name if $albumObj->name;
-					$log->info("resolve_track_info: album_id=$alid → DB name=[$album]");
-				} else {
-					$log->info("resolve_track_info: album_id=$alid → NOT FOUND in DB");
-				}
+				if ($albumObj && $albumObj->name) { $album = $albumObj->name; }
 			}
 		}
-		$log->info("resolve_track_info final: title=[$title] artist=[$artist] album=[$album]");
-		return { title => $title, artist => $artist, album => $album };
+
+		# === 判断 source + 提取 sid ===
+		my $sid;
+		my $is_netease = 0;
+		if ( $url =~ m{netease://track/(\d+)} ) { $sid = $1; $is_netease = 1; }
+		elsif ( $trackId =~ m{^(\d{7,})$} )      { $sid = $1; $is_netease = 1; }
+		elsif ( $url =~ m{(\d{7,})} )            { $sid = $1; $is_netease = 1; }
+
+		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
+		return { title => $title, artist => $artist, album => $album, url => $url, track_id => $trackId, sid => $sid, is_netease => $is_netease };
 	};
 
-	# biography handler（支持多艺人）
+	# biography handler
+	# 明确分两条路径（用 resolve_track_info 的 is_netease 判断）：
+	#   网易云曲目 → sid → ensure_track_ids → artist_ids
+	#   本地曲目   → title/artist → search_track_id → sid → artist_ids
 	my $netease_biography_handler = sub {
 		my $request = shift;
 		$request->setStatusProcessing();
 
+		my $info = $resolve_track_info->($request);
 		my @artistIds;
 
-		# 尝试 1: 直接给了 artist_id（可能是逗号分隔多个）
-		# 注意：Material Skin 对本地曲目传的 artist_id 是 LMS DB 自增 ID（1-3 位），
-		# 不是网易云 ID（7+ 位），要过滤掉！
-		my $artistIdParam = $request->getParam('artist_id');
-		if ($artistIdParam) {
-			my @candidates = grep { $_ && /^\d{7,}$/ } split /[,\s]+/, $artistIdParam;
-			push @artistIds, @candidates;
-		}
+		if ($info->{is_netease} && $info->{sid}) {
+			# 网易云曲目：sid 已确定，直接 song detail 拿 artist_ids（网易云定义的多艺人）
+			my $meta = $ensure_track_ids->($info->{sid});
+			$log->info("biography [NETEASE] sid=$info->{sid} → artists = " . ($meta->{artist_ids} ? join(',', @{$meta->{artist_ids}}) : 'undef'));
+			if ( ref($meta->{artist_ids}) eq 'ARRAY' && @{ $meta->{artist_ids} } ) {
+				push @artistIds, @{ $meta->{artist_ids} };
+			}
+		} else {
+			# 本地曲目：先 Material Skin 直接给的 artist_id（只有 7+ 位网易云 ID 才用）
+			my $artistIdParam = $request->getParam('artist_id');
+			if ($artistIdParam) {
+				my @candidates = grep { $_ && /^\d{7,}$/ } split /[,\s]+/, $artistIdParam;
+				push @artistIds, @candidates;
+			}
 
-		# 尝试 2: 从 song_id 缓存拿
-		if ( !@artistIds ) {
-			my $sid = $extract_song_id->($request);
-			if ($sid) {
-				my $meta = $ensure_track_ids->($sid);
-				if ( ref($meta->{artist_ids}) eq 'ARRAY' ) {
-					push @artistIds, @{ $meta->{artist_ids} };
+			# 兜底：用 title/artist 搜网易云 track
+			if ( !@artistIds && $info->{title} ) {
+				my $sid2 = $search_track_id->($info->{title}, $info->{artist});
+				$log->info("biography [LOCAL] title=[$info->{title}] artist=[$info->{artist}] → sid=" . ($sid2 // 'undef'));
+				if ($sid2) {
+					my $meta = $ensure_track_ids->($sid2);
+					if ( ref($meta->{artist_ids}) eq 'ARRAY' && @{ $meta->{artist_ids} } ) {
+						push @artistIds, @{ $meta->{artist_ids} };
+					}
 				}
 			}
-		}
 
-		# 尝试 3: 先搜 track 拿 SID，再从网易云 track API 拿完整 artist_ids
-		if ( !@artistIds ) {
-			my $info = $resolve_track_info->($request);
-			my $sid = $search_track_id->($info->{title}, $info->{artist});
-			$log->info("biography try3: title=[$info->{title}] artist=[$info->{artist}] sid=" . ($sid // 'undef'));
-			if ($sid) {
-				my $meta = $ensure_track_ids->($sid);
-				$log->info("biography try3: artist_ids from ensure = " . ($meta->{artist_ids} ? join(',', @{$meta->{artist_ids}}) : 'undef'));
-				if ( ref($meta->{artist_ids}) eq 'ARRAY' ) {
-					push @artistIds, @{ $meta->{artist_ids} };
+			# 最后兜底：按艺人名字逐个搜 artist_id
+			if ( !@artistIds ) {
+				my @names = $split_names->($info->{artist});
+				for my $n (@names) {
+					my $aid = $search_artist_id->($n, $info->{title});
+					push @artistIds, $aid if $aid;
 				}
-			}
-		}
-
-		# 尝试 4: 兜底 - 逐个艺人名字搜
-		if ( !@artistIds ) {
-			my $info = $resolve_track_info->($request);
-			my @names = $split_names->($info->{artist});
-			for my $n (@names) {
-				my $aid = $search_artist_id->($n, $info->{title});
-				push @artistIds, $aid if $aid;
 			}
 		}
 
