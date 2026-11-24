@@ -641,12 +641,25 @@ sub initPlugin {
 			}
 		}
 
-		# === 判断 source + 提取 sid ===
+		# === 判断 source + 提取 sid（借鉴 MAI 的做法） ===
+		# MAI 用 $track->isRemoteURL + ProtocolHandlers->handlerForURL 判断来源
 		my $sid;
 		my $is_netease = 0;
-		if ( $url =~ m{netease://track/(\d+)} ) { $sid = $1; $is_netease = 1; }
-		elsif ( $trackId =~ m{^(\d{7,})$} )      { $sid = $1; $is_netease = 1; }
-		elsif ( $url =~ m{(\d{7,})} )            { $sid = $1; $is_netease = 1; }
+		if ( $url =~ m{^netease://track/(\d+)} ) {
+			$sid = $1;
+			$is_netease = 1;
+		}
+		# 代理流 URL（CDN 直链） — 也会被 ProtocolHandler 处理
+		elsif ( $url =~ m{^https?://} && $url =~ m{(\d{7,})} ) {
+			# 远程 URL 里抓网易云 song id（CDN URL 通常包含 track id）
+			$sid = $1;
+			$is_netease = 1;
+		}
+		# LMS DB track_id 本身是网易云 song id（如果 track 是代理流导入的）
+		elsif ( $trackId =~ m{^(\d{7,})$} ) {
+			$sid = $1;
+			$is_netease = 1;
+		}
 
 		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
 		return { title => $title, artist => $artist, album => $album, url => $url, track_id => $trackId, sid => $sid, is_netease => $is_netease };
