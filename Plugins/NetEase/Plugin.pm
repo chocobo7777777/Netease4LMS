@@ -657,14 +657,24 @@ sub initPlugin {
 				push @artistIds, @{ $meta->{artist_ids} };
 			}
 		} else {
-			# 本地曲目：先 Material Skin 直接给的 artist_id（只有 7+ 位网易云 ID 才用）
+			# 本地曲目：先看 overrideMAI
+			my $override = $prefs->get('overrideMAI') // 1;
+
+			# overrideMAI=0 → 交还 MAI，不走网易云搜索
+			if (!$override) {
+				my $orig = Plugins::MusicArtistInfo::ArtistInfo->can('getBiographyCLI');
+				if ($orig) { return $orig->($request); }
+				$request->setStatusDone();
+				return;
+			}
+
+			# overrideMAI=1 → 网易云兜底搜索
 			my $artistIdParam = $request->getParam('artist_id');
 			if ($artistIdParam) {
 				my @candidates = grep { $_ && /^\d{7,}$/ } split /[,\s]+/, $artistIdParam;
 				push @artistIds, @candidates;
 			}
 
-			# 兜底：用 title/artist 搜网易云 track
 			if ( !@artistIds && $info->{title} ) {
 				my $sid2 = $search_track_id->($info->{title}, $info->{artist});
 				$log->info("biography [LOCAL] title=[$info->{title}] artist=[$info->{artist}] → sid=" . ($sid2 // 'undef'));
@@ -676,7 +686,6 @@ sub initPlugin {
 				}
 			}
 
-			# 最后兜底：按艺人名字逐个搜 artist_id
 			if ( !@artistIds ) {
 				my @names = $split_names->($info->{artist});
 				for my $n (@names) {
@@ -684,18 +693,15 @@ sub initPlugin {
 					push @artistIds, $aid if $aid;
 				}
 			}
-		}
 
-		if ( !@artistIds ) {
-			if ($prefs->get('overrideMAI') // 1) {
+			# overrideMAI=1 但还是搜不到 → 返回空（MAI 也查不到有用的，而且 MAI 会超时）
+			if ( !@artistIds ) {
 				$request->setStatusDone();
 				return;
 			}
-			my $orig = Plugins::MusicArtistInfo::ArtistInfo->can('getBiographyCLI');
-			if ($orig) { return $orig->($request); }
-			$request->setStatusDone();
-			return;
 		}
+
+		# 走到这里就是有 artistIds 了，继续 fetch bios...
 
 		# 逐个艺人拿简介（去重）
 		my %seen;
@@ -739,48 +745,35 @@ sub initPlugin {
 		my $request = shift;
 		$request->setStatusProcessing();
 
-		# Material Skin 对本地曲目传的 album_id 是 LMS DB 自增 ID（1-3 位），
-		# 不是网易云 ID（7+ 位），要过滤掉！
-		my $albumId = $request->getParam('album_id');
-		$albumId = undef if defined $albumId && $albumId !~ /^\d{7,}$/;
+		my $info = $resolve_track_info->($request);
+		my $albumId;
 
-		if ( !$albumId ) {
-			my $sid = $extract_song_id->($request);
-			if ($sid) {
-				my $meta = $ensure_track_ids->($sid);
-				$albumId = $meta->{album_id} if $meta->{album_id};
+		if ($info->{is_netease} && $info->{sid}) {
+			# 网易云曲目：直接 song detail 拿 album_id
+			my $meta = $ensure_track_ids->($info->{sid});
+			$albumId = $meta->{album_id} if $meta->{album_id};
+		} else {
+			# 本地曲目：overrideMAI=0 → 交还 MAI
+			my $override = $prefs->get('overrideMAI') // 1;
+			if (!$override) {
+				my $orig = Plugins::MusicArtistInfo::AlbumInfo->can('getAlbumReviewCLI');
+				if ($orig) { return $orig->($request); }
+				$request->setStatusDone();
+				return;
 			}
-		}
 
-		if ( !$albumId ) {
-			# 先搜 track 拿 SID → ensure_track_ids 拿 album_id（和在线版本一致）
-			my $info = $resolve_track_info->($request);
+			# overrideMAI=1 → 网易云搜索
 			my $sid = $search_track_id->($info->{title}, $info->{artist});
 			if ($sid) {
 				my $meta = $ensure_track_ids->($sid);
 				$albumId = $meta->{album_id} if $meta->{album_id};
 			}
-
-			# 兜底：用 album 名字搜
-			if ( !$albumId ) {
-				my @names = $split_names->($info->{artist});
-				for my $n (@names) {
-					$albumId = $search_album_id->($info->{album}, $n);
-					last if $albumId;
-				}
-				if ( !$albumId && $info->{album} ) {
-					$albumId = $search_album_id->($info->{album}, '');
-				}
+			if ( !$albumId && $info->{album} ) {
+				$albumId = $search_album_id->($info->{album}, '');
 			}
 		}
 
 		if ( !$albumId ) {
-			if ($prefs->get('overrideMAI') // 1) {
-				$request->setStatusDone();
-				return;
-			}
-			my $orig = Plugins::MusicArtistInfo::AlbumInfo->can('getAlbumReviewCLI');
-			if ($orig) { return $orig->($request); }
 			$request->setStatusDone();
 			return;
 		}
