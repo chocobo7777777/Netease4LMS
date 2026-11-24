@@ -644,37 +644,18 @@ sub initPlugin {
 		}
 
 		# === 判断 source + 提取 sid ===
-		# 借鉴 MAI：用 track 对象的 isRemoteURL()/remote()，不瞎猜数字！
-		# 但 resolve_track_info 拿到的可能是 request 参数（不是 track 对象），
-		# 所以同时用 URL 前缀做兜底。
+		# LMS DB 里代理流 URL 就是 netease://track/<sid>（不是 CDN 直链！）
+		# 所以用 URL 前缀 + track->isRemoteURL 两个正道判断
 		my $sid;
 		my $is_netease = 0;
 
-		# 1. 从 curTrack 对象判断（最准 — LMS 内置方法）
-		if ($curTrack) {
-			if ( $curTrack->can('isRemoteURL') && $curTrack->isRemoteURL ) {
-				$is_netease = 1;  # 远程 URL → 交给网易云后端处理
-			}
-			if ( !$sid && $curTrack->can('url') && $curTrack->url ) {
-				if ( $curTrack->url =~ m{^netease://track/(\d+)} ) { $sid = $1; }
-			}
+		if ( $url =~ m{^netease://track/(\d+)} ) {
+			$sid = $1;
+			$is_netease = 1;
 		}
-
-		# 2. request 参数兜底（Material Skin 没传 curTrack 的情况）
-		if (!$is_netease && $url) {
-			if ( $url =~ m{^netease://track/(\d+)} ) {
-				$sid = $1;
-				$is_netease = 1;
-			} elsif ( $url =~ m{^https?://} ) {
-				# 远程 URL（代理流 CDN）→ 交给网易云后端，sid 后面补
-				$is_netease = 1;
-			}
-		}
-
-		# 3. 本地曲目：如果是网易云代理流但 URL 已被换成 CDN 直链，
-		#    可以从缓存里找 sid（ProtocolHandler 预热的 netease_meta_<sid>）
-		if ($is_netease && !$sid && $title) {
-			# 没 sid 也没关系，biography handler 会走 search_track_id(title, artist)
+		# 兜底：用 LMS 内置方法（MAI 也这么干）
+		elsif ($curTrack && $curTrack->can('isRemoteURL') && $curTrack->isRemoteURL) {
+			$is_netease = 1;  # 远程 URL 交给网易云后端，sid 后面补
 		}
 
 		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
