@@ -602,9 +602,10 @@ sub initPlugin {
 				$album = ref($alb) ? ($alb->name // '') : ($alb // '');
 			}
 
-			# source + sid（MAI 也这么干）
-			$is_netease = ( $curTrack->can('isRemoteURL') && $curTrack->isRemoteURL ) ? 1 : 0;
-			if ( $url =~ m{^netease://track/(\d+)} ) { $sid = $1; }
+			# source + sid
+			# 我们只注册了 netease:// 协议，匹配到就是网易云代理流
+			($sid) = $url =~ m{^netease://track/(\d+)};
+			$is_netease = defined($sid) ? 1 : 0;
 		}
 
 		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
