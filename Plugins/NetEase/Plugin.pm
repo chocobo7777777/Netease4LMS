@@ -602,10 +602,14 @@ sub initPlugin {
 				$album = ref($alb) ? ($alb->name // '') : ($alb // '');
 			}
 
-			# source + sid
-			# 我们只注册了 netease:// 协议，匹配到就是网易云代理流
-			($sid) = $url =~ m{^netease://track/(\d+)};
-			$is_netease = defined($sid) ? 1 : 0;
+			# source + sid（和 Material Skin 一样：用 ProtocolHandlers）
+			$sid = undef;
+			$is_netease = 0;
+			my $handler = Slim::Player::ProtocolHandlers->handlerForURL($url);
+			if ( $handler && $handler eq 'Plugins::NetEase::ProtocolHandler' ) {
+				$is_netease = 1;
+				($sid) = $url =~ m{^netease://track/(\d+)};
+			}
 		}
 
 		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
