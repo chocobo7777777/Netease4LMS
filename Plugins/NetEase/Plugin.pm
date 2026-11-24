@@ -587,24 +587,31 @@ sub initPlugin {
 		my $curTrack;
 		if ($player) {
 			$curTrack = eval { $player->playingTrack() } || eval { $player->currentTrack() };
-			if ($curTrack) {
-				$url     ||= (eval { $curTrack->url } // '');
-				$trackId ||= (eval { $curTrack->id }  // '');
-				$title   ||= (eval { $curTrack->title } // '');
-				if (!$artist) {
-					if ( $curTrack->can('artists') && $curTrack->artists ) {
-						my @anames;
-						for my $a ($curTrack->artists) { push @anames, ref($a) ? ($a->name // $a) : $a; }
-						$artist = join(', ', @anames);
-					} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
-						my $a = $curTrack->artist;
-						$artist = ref($a) ? ($a->name // '') : ($a // '');
-					}
+		}
+		# MAI 正道：用 client 拿 Playlist::track（比 request->player() 更可靠）
+		if (!$curTrack) {
+			my $client = eval { $request->client() };
+			if ($client && Slim::Player::Playlist->can('track')) {
+				$curTrack = eval { Slim::Player::Playlist::track($client) };
+			}
+		}
+		if ($curTrack) {
+			$url     ||= (eval { $curTrack->url } // '');
+			$trackId ||= (eval { $curTrack->id }  // '');
+			$title   ||= (eval { $curTrack->title } // '');
+			if (!$artist) {
+				if ( $curTrack->can('artists') && $curTrack->artists ) {
+					my @anames;
+					for my $a ($curTrack->artists) { push @anames, ref($a) ? ($a->name // $a) : $a; }
+					$artist = join(', ', @anames);
+				} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
+					my $a = $curTrack->artist;
+					$artist = ref($a) ? ($a->name // '') : ($a // '');
 				}
-				if ( !$album && $curTrack->can('album') && $curTrack->album ) {
-					my $alb = $curTrack->album;
-					$album = ref($alb) ? ($alb->name // '') : ($alb // '');
-				}
+			}
+			if ( !$album && $curTrack->can('album') && $curTrack->album ) {
+				my $alb = $curTrack->album;
+				$album = ref($alb) ? ($alb->name // '') : ($alb // '');
 			}
 		}
 
@@ -619,6 +626,26 @@ sub initPlugin {
 			if ( $alid =~ /^\d+$/ && Slim::Schema->can('find') ) {
 				my $albumObj = Slim::Schema->find('Album', $alid);
 				if ($albumObj && $albumObj->name) { $album = $albumObj->name; }
+			}
+		}
+
+		# track_id DB 反查（lyrics handler 有时有 track_id，有时 player context 丢了）
+		if ( !$title && $trackId && $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
+			my $track = Slim::Schema->find('Track', $trackId);
+			if ($track) {
+				$title  ||= $track->title  if $track->title;
+				if (!$artist) {
+					if ($track->can('artists') && $track->artists) {
+						my @anames;
+						for my $a ($track->artists) { push @anames, $a->name if $a->name; }
+						$artist = join(', ', @anames);
+					} elsif ($track->can('artist') && $track->artist && ref($track->artist) && $track->artist->name) {
+						$artist = $track->artist->name;
+					}
+				}
+				if ( !$album && $track->album ) {
+					$album = ref($track->album) ? $track->album->name : $track->album;
+				}
 			}
 		}
 
