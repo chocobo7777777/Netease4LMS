@@ -567,98 +567,48 @@ sub initPlugin {
 	};
 
 	# === 统一 track 信息解析 ===
-	# 整合：player session 兜底 + DB 反查 + sid 提取 + is_netease 判断
+	# Material Skin 所有 CLI (lyrics/biography/albumreview) 都不传 url/track_id/title/artist，
+	# 只传 artist_id/album_id (LMS DB ID)。所以 curTrack 一定能从 player session 拿到。
+	# MAI 也是这么干的：用 $track->isRemoteURL() 判断 source。
 	# 返回: { title, artist, album, url, track_id, sid, is_netease }
 	# 注意：赋值不加 my！前向声明已在 line 257，加 my 会创建新变量导致闭包崩溃
 	$resolve_track_info = sub {
 		my ($request) = @_;
-		my $url     = $request->getParam('url')      || '';
-		my $trackId = $request->getParam('track_id') || '';
-		my $title   = $request->getParam('title')    || '';
-		my $artist  = $request->getParam('artist')   || '';
-		my $album   = $request->getParam('album')    || '';
 
-		my ($player, $curTrack);
+		# 唯一数据源：player session 的 curTrack
+		my $player  = eval { $request->player() };
+		my $curTrack = $player ? (eval { $player->playingTrack() } || eval { $player->currentTrack() }) : undef;
 
-		# Material Skin 常只传 artist_id/album_id，不传 url/track_id/title/artist！
-		# 从 Player session 拿当前正在播放的 track 补全
-		if ( !$url && !$trackId && !$title && !$artist ) {
-			$player = eval { $request->player() };
-			if ($player) {
-				$curTrack = eval { $player->playingTrack() } || eval { $player->currentTrack() };
-				if ($curTrack) {
-					if ( !$url && $curTrack->can('url') && $curTrack->url ) { $url = $curTrack->url; }
-					if ( !$trackId && $curTrack->can('id') && $curTrack->id ) { $trackId = $curTrack->id; }
-					if ( !$title && $curTrack->can('title') && $curTrack->title ) { $title = $curTrack->title; }
-					if ( !$artist ) {
-						if ( $curTrack->can('artists') && $curTrack->artists ) {
-							my @anames;
-							for my $a ($curTrack->artists) {
-								push @anames, ref($a) ? ($a->name // $a) : $a;
-							}
-							$artist = join(', ', @anames) if @anames;
-						} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
-							my $a = $curTrack->artist;
-							$artist = ref($a) ? ($a->name // '') : ($a // '');
-						}
-					}
-					if ( !$album && $curTrack->can('album') && $curTrack->album ) {
-						my $alb = $curTrack->album;
-						$album = ref($alb) ? ($alb->name // '') : ($alb // '');
-					}
-				}
-			}
-		}
-
-		# 从 track_id 反查 DB（如果还缺 title/artist）
-		if ( $trackId && $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
-			my $track = Slim::Schema->find('Track', $trackId);
-			if ($track) {
-				$title  ||= $track->title  if $track->title;
-				$album  ||= $track->album  ? (ref($track->album) ? $track->album->name : $track->album) : '';
-				if (!$artist) {
-					if ($track->can('artists') && $track->artists) {
-						my @anames;
-						for my $a ($track->artists) { push @anames, $a->name if $a->name; }
-						$artist = join(', ', @anames);
-					} elsif ($track->can('artist') && $track->artist) {
-						my $a = $track->artist;
-						$artist = ref($a) ? ($a->name // '') : ($a // '');
-					}
-				}
-			}
-		}
-
-		# artist_id / album_id DB 反查（补充 artist/album）
-		if ( !$artist && (my $aid = $request->getParam('artist_id')) ) {
-			if ( $aid =~ /^\d+$/ && Slim::Schema->can('find') ) {
-				my $artistObj = Slim::Schema->find('Contributor', $aid) || Slim::Schema->find('Artist', $aid);
-				if ($artistObj && $artistObj->name) { $artist = $artistObj->name; }
-			}
-		}
-		if ( !$album && (my $alid = $request->getParam('album_id')) ) {
-			if ( $alid =~ /^\d+$/ && Slim::Schema->can('find') ) {
-				my $albumObj = Slim::Schema->find('Album', $alid);
-				if ($albumObj && $albumObj->name) { $album = $albumObj->name; }
-			}
-		}
-
-		# === 判断 source + 提取 sid ===
-		# Material Skin CLI 从不传 url，只有 curTrack（player session 拿的）有。
-		# LMS DB 里代理流 URL 就是 netease://track/<sid>。
-		my $sid;
-		my $is_netease = 0;
+		my ($url, $trackId, $title, $artist, $album, $sid, $is_netease);
 
 		if ($curTrack) {
-			my $turl = $curTrack->url;
-			if ( $turl =~ m{^netease://track/(\d+)} ) {
-				$sid = $1;
-				$is_netease = 1;
+			$url     = $curTrack->url   // '';
+			$trackId = $curTrack->id    // '';
+			$title   = $curTrack->title // '';
+
+			# artist：Contributor 对象 → name
+			if ( $curTrack->can('artists') && $curTrack->artists ) {
+				my @anames;
+				for my $a ($curTrack->artists) { push @anames, ref($a) ? ($a->name // $a) : $a; }
+				$artist = join(', ', @anames);
+			} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
+				my $a = $curTrack->artist;
+				$artist = ref($a) ? ($a->name // '') : ($a // '');
 			}
+
+			# album：Album 对象 → name
+			if ( $curTrack->can('album') && $curTrack->album ) {
+				my $alb = $curTrack->album;
+				$album = ref($alb) ? ($alb->name // '') : ($alb // '');
+			}
+
+			# source + sid（MAI 也这么干）
+			$is_netease = ( $curTrack->can('isRemoteURL') && $curTrack->isRemoteURL ) ? 1 : 0;
+			if ( $url =~ m{^netease://track/(\d+)} ) { $sid = $1; }
 		}
 
 		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
-		return { title => $title, artist => $artist, album => $album, url => $url, track_id => $trackId, sid => $sid, is_netease => $is_netease };
+		return { title => $title // '', artist => $artist // '', album => $album // '', url => $url // '', track_id => $trackId // '', sid => $sid, is_netease => $is_netease // 0 };
 	};
 
 	# biography handler
