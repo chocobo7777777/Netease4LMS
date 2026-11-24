@@ -259,72 +259,63 @@ sub initPlugin {
 	my $netease_lyrics_wrapper = sub {
 		my $request = shift;
 
-		# resolve_track_info 统一处理所有 DB 反查 + player session 兜底 + sid 提取
+		# === 场景判断（唯一入口） ===
 		my $info = $resolve_track_info->($request);
 		my ($url, $trackId, $title, $artist, $sid) = @{$info}{qw(url track_id title artist sid)};
+		my $is_netease = $info->{is_netease};
 
-		$log->info("lyrics: netease=$info->{is_netease} sid=" . ($sid // '') . " t=[$title] a=[$artist]");
+		$log->info("lyrics: scene=" . ($is_netease ? "NETEASE" : "LOCAL") . " sid=" . ($sid // '') . " t=[$title] a=[$artist]");
 
-		# === 1. 优先尝试本地 .lrc 文件 ===
-		my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist);
-		$log->info("lyrics step1: local_lrc = " . (defined($local_lrc) ? length($local_lrc) . " bytes" : "undef"));
-
-		if ($local_lrc && length($local_lrc)) {
-			$request->setStatusProcessing();
-			$local_lrc = _convert_netease_lrc($local_lrc);
-
-			my $want_ts   = $request->getParam('timestamps') ? 1 : 0;
-			my $radio_url = $url;
-			if ( !$want_ts || $radio_url =~ m{^https?://} ) {
-				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
-				$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//g;
-			}
-
-			$request->addResult('lyrics', $local_lrc) if length($local_lrc);
-			$request->setStatusDone();
-			return;
-		}
-
-		# === 2. 本地没命中 → sid 已从 resolve_track_info 拿到 ===
-		$log->info("lyrics step2: sid = " . ($sid // 'undef'));
-
-		# 不是网易云 → 看 overrideMAI 设置
-		if ( !$sid ) {
-			if ($prefs->get('overrideMAI') // 1) {
-				# 精确补 title/artist：Material Skin 歌词 CLI 不传任何参数！
-				# 只有在本地曲目 + overrideMAI + 没 title 时才补
-				if ( !$title ) {
-					my $client = eval { $request->client() };
-					if ($client && Slim::Player::Playlist->can('track')) {
-						my $t = eval { Slim::Player::Playlist::track($client) };
-						if ($t) {
-							$title  = eval { $t->title } // '';
-							$artist = eval {
-								my $a = $t->artist;
-								ref($a) ? ($a->name // '') : ($a // '')
-							} // '';
-						}
-					}
+		# === 分支 A: 本地曲目，先试本地 .lrc ===
+		if (!$is_netease) {
+			my $local_lrc = _try_local_lrc($trackId, $url, $title, $artist);
+			if ($local_lrc && length($local_lrc)) {
+				$request->setStatusProcessing();
+				$local_lrc = _convert_netease_lrc($local_lrc);
+				my $want_ts = $request->getParam('timestamps') ? 1 : 0;
+				if (!$want_ts) {
+					$local_lrc =~ s/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*//gm;
 				}
-				$log->info("lyrics step3: searching NetEase for title=[$title] artist=[$artist]");
-				$sid = $search_track_id->($title, $artist);
-				$log->info("lyrics step3b: search returned sid = " . ($sid // 'undef'));
-				if ( !$sid ) {
-					$request->setStatusDone();
-					return;
-				}
-			}
-			else {
-				# 动态转给 MAI 原始 handler
-				if ( Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI') ) {
-					return Plugins::MusicArtistInfo::TrackInfo::getSongLyricsCLI($request);
-				}
-				$request->setStatusBadDispatch();
+				$request->addResult('lyrics', $local_lrc) if length($local_lrc);
+				$request->setStatusDone();
 				return;
 			}
+
+			# 本地没 .lrc → 看 overrideMAI
+			my $override = $prefs->get('overrideMAI') // 1;
+			if (!$override) {
+				# overrideMAI=0 → 交还 MAI
+				my $orig = Plugins::MusicArtistInfo::TrackInfo->can('getSongLyricsCLI');
+				if ($orig) { return $orig->($request); }
+				$request->setStatusDone();
+				return;
+			}
+
+			# overrideMAI=1 → 补 title/artist（Material Skin 歌词 CLI 不传参数！）
+			if (!$title) {
+				my $client = eval { $request->client() };
+				if ($client && Slim::Player::Playlist->can('track')) {
+					my $t = eval { Slim::Player::Playlist::track($client) };
+					if ($t) {
+						$title  = eval { $t->title } // '';
+						$artist = eval {
+							my $a = $t->artist;
+							ref($a) ? ($a->name // '') : ($a // '')
+						} // '';
+					}
+				}
+			}
+
+			# 搜网易云拿 sid
+			$sid = $search_track_id->($title, $artist);
+			if (!$sid) {
+				$request->setStatusDone();
+				return;
+			}
+			# 拿到 sid 了，走下面网易云后端逻辑
 		}
 
-		# === 网易云曲目：走自建后端拿歌词 ===
+		# === 分支 B: 网易云曲目 / 本地曲目搜到 sid → 走自建后端 ===
 		$request->setStatusProcessing();
 
 		# 先查缓存
