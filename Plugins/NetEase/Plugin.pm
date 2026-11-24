@@ -291,6 +291,21 @@ sub initPlugin {
 		# 不是网易云 → 看 overrideMAI 设置
 		if ( !$sid ) {
 			if ($prefs->get('overrideMAI') // 1) {
+				# 精确补 title/artist：Material Skin 歌词 CLI 不传任何参数！
+				# 只有在本地曲目 + overrideMAI + 没 title 时才补
+				if ( !$title ) {
+					my $client = eval { $request->client() };
+					if ($client && Slim::Player::Playlist->can('track')) {
+						my $t = eval { Slim::Player::Playlist::track($client) };
+						if ($t) {
+							$title  = eval { $t->title } // '';
+							$artist = eval {
+								my $a = $t->artist;
+								ref($a) ? ($a->name // '') : ($a // '')
+							} // '';
+						}
+					}
+				}
 				$log->info("lyrics step3: searching NetEase for title=[$title] artist=[$artist]");
 				$sid = $search_track_id->($title, $artist);
 				$log->info("lyrics step3b: search returned sid = " . ($sid // 'undef'));
@@ -575,45 +590,13 @@ sub initPlugin {
 	$resolve_track_info = sub {
 		my ($request) = @_;
 
-		# 先从 request 参数拿（Material Skin 有时会传）
+		# 只做基础信息聚合：request 参数 + DB 反查 + source 判断
+		# 不做 curTrack 兜底（那是 handler 分支里的事）
 		my $url     = $request->getParam('url')      || '';
 		my $trackId = $request->getParam('track_id') || '';
 		my $title   = $request->getParam('title')    || '';
 		my $artist  = $request->getParam('artist')   || '';
 		my $album   = $request->getParam('album')    || '';
-
-		# 再从 player session 补（Material Skin Artist tab 不传参数时用）
-		my $player  = eval { $request->player() };
-		my $curTrack;
-		if ($player) {
-			$curTrack = eval { $player->playingTrack() } || eval { $player->currentTrack() };
-		}
-		# MAI 正道：用 client 拿 Playlist::track（比 request->player() 更可靠）
-		if (!$curTrack) {
-			my $client = eval { $request->client() };
-			if ($client && Slim::Player::Playlist->can('track')) {
-				$curTrack = eval { Slim::Player::Playlist::track($client) };
-			}
-		}
-		if ($curTrack) {
-			$url     ||= (eval { $curTrack->url } // '');
-			$trackId ||= (eval { $curTrack->id }  // '');
-			$title   ||= (eval { $curTrack->title } // '');
-			if (!$artist) {
-				if ( $curTrack->can('artists') && $curTrack->artists ) {
-					my @anames;
-					for my $a ($curTrack->artists) { push @anames, ref($a) ? ($a->name // $a) : $a; }
-					$artist = join(', ', @anames);
-				} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
-					my $a = $curTrack->artist;
-					$artist = ref($a) ? ($a->name // '') : ($a // '');
-				}
-			}
-			if ( !$album && $curTrack->can('album') && $curTrack->album ) {
-				my $alb = $curTrack->album;
-				$album = ref($alb) ? ($alb->name // '') : ($alb // '');
-			}
-		}
 
 		# artist_id / album_id DB 反查（Material常只传这个）
 		if ( !$artist && (my $aid = $request->getParam('artist_id')) ) {
@@ -629,7 +612,7 @@ sub initPlugin {
 			}
 		}
 
-		# track_id DB 反查（lyrics handler 有时有 track_id，有时 player context 丢了）
+		# track_id DB 反查（如果 Material Skin 只传了 track_id）
 		if ( !$title && $trackId && $trackId =~ /^\d+$/ && Slim::Schema->can('find') ) {
 			my $track = Slim::Schema->find('Track', $trackId);
 			if ($track) {
