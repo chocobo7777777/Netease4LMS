@@ -575,36 +575,58 @@ sub initPlugin {
 	$resolve_track_info = sub {
 		my ($request) = @_;
 
-		# 唯一数据源：player session 的 curTrack
+		# 先从 request 参数拿（Material Skin 有时会传）
+		my $url     = $request->getParam('url')      || '';
+		my $trackId = $request->getParam('track_id') || '';
+		my $title   = $request->getParam('title')    || '';
+		my $artist  = $request->getParam('artist')   || '';
+		my $album   = $request->getParam('album')    || '';
+
+		# 再从 player session 补（Material Skin Artist tab 不传参数时用）
 		my $player  = eval { $request->player() };
-		my $curTrack = $player ? (eval { $player->playingTrack() } || eval { $player->currentTrack() }) : undef;
-
-		my ($url, $trackId, $title, $artist, $album, $sid, $is_netease);
-
-		if ($curTrack) {
-			$url     = $curTrack->url   // '';
-			$trackId = $curTrack->id    // '';
-			$title   = $curTrack->title // '';
-
-			# artist：Contributor 对象 → name
-			if ( $curTrack->can('artists') && $curTrack->artists ) {
-				my @anames;
-				for my $a ($curTrack->artists) { push @anames, ref($a) ? ($a->name // $a) : $a; }
-				$artist = join(', ', @anames);
-			} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
-				my $a = $curTrack->artist;
-				$artist = ref($a) ? ($a->name // '') : ($a // '');
+		my $curTrack;
+		if ($player) {
+			$curTrack = eval { $player->playingTrack() } || eval { $player->currentTrack() };
+			if ($curTrack) {
+				$url     ||= (eval { $curTrack->url } // '');
+				$trackId ||= (eval { $curTrack->id }  // '');
+				$title   ||= (eval { $curTrack->title } // '');
+				if (!$artist) {
+					if ( $curTrack->can('artists') && $curTrack->artists ) {
+						my @anames;
+						for my $a ($curTrack->artists) { push @anames, ref($a) ? ($a->name // $a) : $a; }
+						$artist = join(', ', @anames);
+					} elsif ( $curTrack->can('artist') && $curTrack->artist ) {
+						my $a = $curTrack->artist;
+						$artist = ref($a) ? ($a->name // '') : ($a // '');
+					}
+				}
+				if ( !$album && $curTrack->can('album') && $curTrack->album ) {
+					my $alb = $curTrack->album;
+					$album = ref($alb) ? ($alb->name // '') : ($alb // '');
+				}
 			}
+		}
 
-			# album：Album 对象 → name
-			if ( $curTrack->can('album') && $curTrack->album ) {
-				my $alb = $curTrack->album;
-				$album = ref($alb) ? ($alb->name // '') : ($alb // '');
+		# artist_id / album_id DB 反查（Material常只传这个）
+		if ( !$artist && (my $aid = $request->getParam('artist_id')) ) {
+			if ( $aid =~ /^\d+$/ && Slim::Schema->can('find') ) {
+				my $artistObj = Slim::Schema->find('Contributor', $aid) || Slim::Schema->find('Artist', $aid);
+				if ($artistObj && $artistObj->name) { $artist = $artistObj->name; }
 			}
+		}
+		if ( !$album && (my $alid = $request->getParam('album_id')) ) {
+			if ( $alid =~ /^\d+$/ && Slim::Schema->can('find') ) {
+				my $albumObj = Slim::Schema->find('Album', $alid);
+				if ($albumObj && $albumObj->name) { $album = $albumObj->name; }
+			}
+		}
 
-			# source + sid（和 Material Skin 一样：用 ProtocolHandlers）
-			$sid = undef;
-			$is_netease = 0;
+		# source + sid（和 Material Skin 一样：用 ProtocolHandlers）
+		my ($sid, $is_netease);
+		$sid = undef;
+		$is_netease = 0;
+		if ($url) {
 			my $handler = Slim::Player::ProtocolHandlers->handlerForURL($url);
 			if ( $handler && $handler eq 'Plugins::NetEase::ProtocolHandler' ) {
 				$is_netease = 1;
