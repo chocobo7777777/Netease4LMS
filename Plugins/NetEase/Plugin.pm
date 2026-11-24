@@ -644,18 +644,17 @@ sub initPlugin {
 		}
 
 		# === 判断 source + 提取 sid ===
-		# LMS DB 里代理流 URL 就是 netease://track/<sid>（不是 CDN 直链！）
-		# 所以用 URL 前缀 + track->isRemoteURL 两个正道判断
+		# Material Skin CLI 从不传 url，只有 curTrack（player session 拿的）有。
+		# LMS DB 里代理流 URL 就是 netease://track/<sid>。
 		my $sid;
 		my $is_netease = 0;
 
-		if ( $url =~ m{^netease://track/(\d+)} ) {
-			$sid = $1;
-			$is_netease = 1;
-		}
-		# 兜底：用 LMS 内置方法（MAI 也这么干）
-		elsif ($curTrack && $curTrack->can('isRemoteURL') && $curTrack->isRemoteURL) {
-			$is_netease = 1;  # 远程 URL 交给网易云后端，sid 后面补
+		if ($curTrack) {
+			my $turl = $curTrack->url;
+			if ( $turl =~ m{^netease://track/(\d+)} ) {
+				$sid = $1;
+				$is_netease = 1;
+			}
 		}
 
 		$log->info("resolve_track_info: netease=$is_netease sid=" . ($sid // '') . " t=[$title] a=[$artist] alb=[$album]");
